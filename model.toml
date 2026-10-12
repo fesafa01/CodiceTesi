@@ -1,0 +1,13 @@
+# Parametri inviati all'API del DGX. I campi commentati usano i default del server.
+model = "deepseek-v4-flash"
+max_tokens = 2048
+stream = false
+
+# temperature = 0.2
+# top_p = 0.9
+# top_k = 40
+# min_p = 0.05
+# stop = ["<END>"]
+# seed = 42
+# reasoning_effort = "low"  # Verificare i valori accettati dal server.
+# tool_choice = "auto"     # "auto", "none", "required"; richiede tool registrati per "required".
