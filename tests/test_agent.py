@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sys
+from contextlib import aclosing
 
 import httpx2 as httpx
 import pytest
@@ -11,10 +12,9 @@ from openai import AsyncOpenAI
 from pydantic import ValidationError
 from pydantic_ai.exceptions import UserError
 
-from codice_tesi import agent as agent_module
-from codice_tesi import cli
-from codice_tesi.agent import create_agent
-from codice_tesi.config import Settings
+from codice_tesi import api, cli
+from codice_tesi.agent import create_agent, reply
+from codice_tesi.config import ModelConfig, Settings
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +51,7 @@ def mock_client(handler):
     ],
 )
 def test_agent_uses_configured_chat_endpoint(parameters):
-    settings = Settings.model_validate(
+    config = ModelConfig.model_validate(
         {"model": "deepseek-v4-pro", "max_tokens": 128, **parameters}
     )
 
@@ -76,7 +76,7 @@ def test_agent_uses_configured_chat_endpoint(parameters):
                 "id": "chatcmpl-test",
                 "object": "chat.completion",
                 "created": 1,
-                "model": settings.model,
+                "model": config.model,
                 "choices": [
                     {
                         "index": 0,
@@ -90,7 +90,7 @@ def test_agent_uses_configured_chat_endpoint(parameters):
 
     async def check():
         client = mock_client(handler)
-        async with create_agent(settings, client=client) as agent:
+        async with create_agent(config, client=client) as agent:
             result = await agent.run("Rispondi OK")
             assert result.output == "OK"
         assert client.is_closed()
@@ -116,40 +116,42 @@ def test_list_models(monkeypatch, capsys):
             },
         )
 
-    monkeypatch.setattr(cli, "create_client", lambda settings: mock_client(handler))
-    asyncio.run(cli.run(None, list_models=True, settings=Settings()))
+    monkeypatch.setattr(api, "create_client", lambda settings: mock_client(handler))
+    asyncio.run(cli.run(None, list_models=True, settings=Settings(), config=ModelConfig()))
     assert capsys.readouterr().out == "deepseek-v4-flash\n"
 
 
 def test_environment_overrides_dotenv(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
-    env_file.write_text("LLM_MODEL=file-model\nLLM_API_KEY=private-test-key\n")
-    monkeypatch.setenv("LLM_MODEL", "environment-model")
+    env_file.write_text("LLM_TIMEOUT=30\nLLM_API_KEY=private-test-key\n")
+    monkeypatch.setenv("LLM_TIMEOUT", "60")
     settings = Settings()
-    assert settings.model == "environment-model"
+    assert settings.timeout == 60
     assert settings.api_key.get_secret_value() == "private-test-key"
     assert "private-test-key" not in repr(settings)
 
 
-def test_toml_defaults_dotenv_and_environment_overrides(tmp_path, monkeypatch):
-    (tmp_path / "model.toml").write_text(
-        'model = "deepseek-v4-pro"\nmax_tokens = 512\ntop_k = 30\ntemperature = 0.3\n'
-    )
-    (tmp_path / ".env").write_text("LLM_TEMPERATURE=0.2\n")
-    monkeypatch.setenv("LLM_TOP_K", "40")
-    settings = Settings()
-    assert settings.model == "deepseek-v4-pro"
-    assert settings.max_tokens == 512
-    assert settings.temperature == 0.2
-    assert settings.top_k == 40
-    assert Settings(temperature=0.1).temperature == 0.1
+def test_model_configuration_is_only_from_python(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "environment-model")
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.9")
+    config = ModelConfig(model="deepseek-v4-pro", max_tokens=512, top_k=30, temperature=0.3)
+    assert config.model == "deepseek-v4-pro"
+    assert config.max_tokens == 512
+    assert config.temperature == 0.3
+    assert config.top_k == 30
+    assert ModelConfig().model == "deepseek-v4-flash"
+    assert ModelConfig().temperature is None
+
+
+@pytest.mark.parametrize("overrides", [{"base_url": "invalid"}, {"timeout": 0}])
+def test_invalid_connection_configuration(overrides):
+    with pytest.raises(ValidationError):
+        Settings.model_validate(overrides)
 
 
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"base_url": "invalid"},
-        {"timeout": 0},
         {"max_tokens": 0},
         {"temperature": -0.1},
         {"top_p": 1.1},
@@ -161,14 +163,23 @@ def test_toml_defaults_dotenv_and_environment_overrides(tmp_path, monkeypatch):
 )
 def test_invalid_configuration(overrides):
     with pytest.raises(ValidationError):
-        Settings.model_validate(overrides)
+        ModelConfig.model_validate(overrides)
+
+
+def test_model_configuration_validates_python_assignments():
+    config = ModelConfig()
+    config.temperature = 0.2
+    assert config.request_settings().get("temperature") == 0.2
+    with pytest.raises(ValidationError):
+        config.max_tokens = 0
+    assert config.max_tokens == 2048
 
 
 def test_connection_failure_has_actionable_message(monkeypatch, capsys):
     def handler(request):
         raise httpx.ConnectError("Connection refused", request=request)
 
-    monkeypatch.setattr(cli, "create_client", lambda settings: mock_client(handler))
+    monkeypatch.setattr(api, "create_client", lambda settings: mock_client(handler))
     monkeypatch.setattr(sys, "argv", ["tesi-agent", "--list-models"])
     with pytest.raises(SystemExit) as exc:
         cli.main()
@@ -178,9 +189,27 @@ def test_connection_failure_has_actionable_message(monkeypatch, capsys):
     assert "Traceback" not in error
 
 
-def test_streaming_uses_sse_and_prints_text(monkeypatch, capsys):
+@pytest.mark.parametrize("stream", [True, False])
+def test_cli_streams_by_default_and_can_disable_it(monkeypatch, capsys, stream):
     def handler(request):
-        assert json.loads(request.content)["stream"] is True
+        assert json.loads(request.content)["stream"] is stream
+        if not stream:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "deepseek-v4-flash",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "Ciao mondo"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
         chunks = []
         for text, finish in (("Ciao ", None), ("mondo", "stop")):
             chunk = {
@@ -197,9 +226,48 @@ def test_streaming_uses_sse_and_prints_text(monkeypatch, capsys):
             content="".join(chunks) + "data: [DONE]\n\n",
         )
 
-    monkeypatch.setattr(agent_module, "create_client", lambda settings: mock_client(handler))
-    asyncio.run(cli.run("Saluta", list_models=False, settings=Settings(stream=True)))
+    monkeypatch.setattr(api, "create_client", lambda settings: mock_client(handler))
+    monkeypatch.setattr(sys, "argv", ["tesi-agent", "Saluta"] + ([] if stream else ["--no-stream"]))
+    cli.main()
     assert capsys.readouterr().out == "Ciao mondo\n"
+
+
+def test_reply_yields_text_before_http_stream_finishes(monkeypatch):
+    async def check():
+        release = asyncio.Event()
+
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                for text, finish in (("Ciao ", None), ("mondo", "stop")):
+                    chunk = {
+                        "id": "chatcmpl-stream",
+                        "object": "chat.completion.chunk",
+                        "created": 1,
+                        "model": "deepseek-v4-flash",
+                        "choices": [
+                            {"index": 0, "delta": {"content": text}, "finish_reason": finish}
+                        ],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n".encode()
+                    if finish is None:
+                        await release.wait()
+                yield b"data: [DONE]\n\n"
+
+        def handler(request):
+            assert json.loads(request.content)["stream"] is True
+            return httpx.Response(
+                200, headers={"Content-Type": "text/event-stream"}, stream=Stream()
+            )
+
+        client = mock_client(handler)
+        monkeypatch.setattr(api, "create_client", lambda settings: client)
+        async with aclosing(reply("Saluta", ModelConfig())) as chunks:
+            assert await asyncio.wait_for(anext(chunks), timeout=2) == "Ciao "
+            release.set()
+            assert "".join([text async for text in chunks]) == "mondo"
+        assert client.is_closed()
+
+    asyncio.run(check())
 
 
 @pytest.mark.parametrize("tool_choice", ["auto", "none", "required"])
@@ -250,7 +318,7 @@ def test_registered_tools_and_tool_choice_are_sent(tool_choice):
 
     async def check():
         async with create_agent(
-            Settings(tool_choice=tool_choice), client=mock_client(handler)
+            ModelConfig(tool_choice=tool_choice), client=mock_client(handler)
         ) as agent:
 
             @agent.tool_plain
@@ -270,7 +338,7 @@ def test_requiring_tools_without_registration_fails_before_request():
 
     async def check():
         async with create_agent(
-            Settings(tool_choice="required"), client=mock_client(handler)
+            ModelConfig(tool_choice="required"), client=mock_client(handler)
         ) as agent:
             with pytest.raises(UserError, match="no function tools"):
                 await agent.run("Rispondi OK")

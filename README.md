@@ -21,14 +21,45 @@ Eseguire dalla radice di questa repository:
 uv sync --locked
 uv run tesi-agent --list-models
 uv run tesi-agent "Rispondi brevemente: qual è il tuo compito?"
-uv run tesi-agent --stream "Rispondi soltanto: OK"
+uv run tesi-agent --no-stream "Rispondi soltanto: OK"
 ```
+
+La risposta viene mostrata progressivamente per default. `--no-stream` attende
+la risposta completa; `--stream` forza lo streaming se disabilitato in Python.
+
+Su macOS, l'attributo `hidden` applicato ricorsivamente a `.venv` può far ignorare
+a Python i file `.pth` dell'installazione editable, causando
+`ModuleNotFoundError: No module named 'codice_tesi'`. Per ripristinarli:
+
+```bash
+chflags -R nohidden .venv .cache
+```
+
+Le cartelle restano nascoste nel Finder grazie al punto iniziale del nome.
 
 ## Configurazione
 
-Modello e generazione si configurano in **`model.toml`**. Sono attivi solo il modello
-`deepseek-v4-flash`, il limite di 2048 token e la risposta senza streaming. I parametri
-commentati non vengono inviati: il server conserva i propri default.
+Modello e generazione si configurano direttamente in Python tramite
+**`ModelConfig(BaseModel)`**, definito in `src/codice_tesi/config.py`.
+Per cambiare il comportamento della CLI, modificare i default della classe.
+Da Python si può passare un'istanza personalizzata a `reply()` o `create_agent()`:
+
+```python
+from codice_tesi.config import ModelConfig
+
+config = ModelConfig(
+    model="deepseek-v4-flash",
+    max_tokens=2048,
+    temperature=0.2,
+    top_p=0.9,
+    stream=True,
+)
+```
+
+I default attivi sono `deepseek-v4-flash`, 2048 token e streaming.
+I parametri opzionali impostati a `None` non vengono inviati: il server conserva
+i propri default. Pydantic valida sia la creazione dell'istanza sia le assegnazioni
+successive, per esempio `config.temperature = 0.3`.
 
 | Parametro | Effetto |
 | --- | --- |
@@ -52,13 +83,14 @@ LLM_TIMEOUT=120
 
 Questi sono anche i valori predefiniti: `.env` serve solo per modificarli.
 `not-required` è un segnaposto per l'endpoint attuale senza autenticazione.
-Ogni campo può essere sovrascritto con `LLM_<NOME>`: l'ordine è argomenti Python,
-variabili d'ambiente, `.env`, `model.toml`, default del codice. Per esempio:
+`Settings(BaseSettings)` gestisce solo connessione e credenziali. L'ordine è
+argomenti Python, variabili d'ambiente, `.env`, default del codice. Per esempio:
 
 ```bash
-LLM_MODEL=deepseek-v4-pro uv run tesi-agent "Rispondi soltanto: OK"
-LLM_TEMPERATURE=0.2 uv run tesi-agent --no-stream "Rispondi soltanto: OK"
+LLM_TIMEOUT=60 uv run tesi-agent "Rispondi soltanto: OK"
 ```
+
+I parametri di `ModelConfig` vengono letti esclusivamente dal codice Python.
 
 La risposta di `/v1/models` descrive capacità e limiti, non i valori in uso.
 `context_length` e `top_provider.max_completion_tokens` (100000 dichiarati dal server)
@@ -66,28 +98,49 @@ non si modificano dal client; impostare `max_tokens` non aumenta questi limiti.
 `supported_parameters` non specifica i default né i valori ammessi per `reasoning_effort`.
 `top_k` e `min_p` vengono aggiunti al corpo JSON tramite `extra_body` del client.
 
+## Chiamate API
+
+`src/codice_tesi/api.py` raccoglie la configurazione del client HTTP e l'adattatore
+che PydanticAI usa per comunicare con il DGX:
+
+| Metodo | Endpoint | Utilizzo |
+| --- | --- | --- |
+| GET | `/v1/models` | `list_models(settings)` restituisce gli ID disponibili. |
+| POST | `/v1/chat/completions` | L'agente invia messaggi, parametri e schemi dei tool tramite `OpenAIChatModel`. |
+
+Il client SDK esegue le richieste HTTP e legge le risposte JSON o gli eventi SSE
+di streaming. PydanticAI gestisce il ciclo dell'agente e le eventuali chiamate ai tool.
+`argparse` in `cli.py` legge esclusivamente gli argomenti del terminale;
+gli `add_argument` non definiscono richieste HTTP.
+
 ## Uso da Python
 
 La CLI è solo un'interfaccia. L'agente è utilizzabile direttamente e il client HTTP
 viene chiuso automaticamente all'uscita dal contesto:
 
 ```python
-from codice_tesi.agent import create_agent
+from codice_tesi.agent import reply
+from codice_tesi.config import ModelConfig
+
+config = ModelConfig(temperature=0.2, max_tokens=1024)
 
 
-async def chiedi(prompt: str) -> str:
-    async with create_agent() as agent:
-        return (await agent.run(prompt)).output
+async def chiedi(prompt: str) -> None:
+    async for text in reply(prompt, config):
+        print(text, end="", flush=True)
+    print()
 ```
 
 `tools` indica le funzioni disponibili all'agente, da registrare in Python con
-`@agent.tool` o `@agent.tool_plain` dentro il contesto. PydanticAI ne genera lo schema,
+`@agent.tool` o `@agent.tool_plain` dentro `async with create_agent() as agent`,
+importando `create_agent` da `codice_tesi.agent`. PydanticAI ne genera lo schema,
 lo invia al server ed esegue le eventuali chiamate. Non sono attivi tool predefiniti:
 il flag `required` da solo non ne crea e senza tool registrati produce un errore.
 Dopo la prima chiamata obbligatoria, si passa ad `auto` per consentire la risposta finale.
-Per lo streaming da Python usare
-`agent.run_stream()` e `response.stream_text(delta=True)`; il campo `stream` del TOML
-controlla la CLI.
+`reply()` rispetta `config.stream` e chiude il client quando termina.
+Chiamando `reply(prompt)` o `create_agent()` si usano i default di `ModelConfig`.
+Per controllare direttamente l'agente usare `create_agent(config)` e
+`agent.run_stream()` oppure `agent.run()`.
 
 Ogni comando esegue una richiesta indipendente: non conserva una cronologia e non
 abilita telemetria dell'agente. Per le prove iniziali usare testi sintetici.
@@ -95,7 +148,8 @@ abilita telemetria dell'agente. Per le prove iniziali usare testi sintetici.
 ## Sviluppo
 
 Il codice è in `src/codice_tesi/`: `config.py` gestisce la configurazione,
-`agent.py` costruisce l'agente e `cli.py` espone il comando `tesi-agent`.
+`api.py` raccoglie il client e l'adattatore HTTP, `agent.py` costruisce l'agente
+e produce le risposte, `cli.py` legge gli argomenti e stampa i risultati.
 Le dipendenze sono in `pyproject.toml` e bloccate in `uv.lock`, da versionare insieme.
 
 ```bash

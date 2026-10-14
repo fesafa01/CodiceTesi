@@ -4,32 +4,26 @@ import argparse
 import asyncio
 import os
 import sys
-from tomllib import TOMLDecodeError
 
 from openai import APIConnectionError, APIStatusError
 from pydantic import ValidationError
 from pydantic_ai.exceptions import AgentRunError, UserError
 
-from codice_tesi.agent import create_agent, create_client
-from codice_tesi.config import Settings
+from codice_tesi import api
+from codice_tesi.agent import reply
+from codice_tesi.config import ModelConfig, Settings
 
 
-async def run(prompt: str | None, *, list_models: bool, settings: Settings) -> None:
+async def run(
+    prompt: str | None, *, list_models: bool, settings: Settings, config: ModelConfig
+) -> None:
     if list_models:
-        async with create_client(settings) as client:
-            models = await client.models.list()
-            for model in models.data:
-                print(model.id)
-        return
-
-    async with create_agent(settings) as agent:
-        if settings.stream:
-            async with agent.run_stream(prompt) as response:
-                async for text in response.stream_text(delta=True):
-                    print(text, end="", flush=True)
-            print()
-        else:
-            print((await agent.run(prompt)).output)
+        for model in await api.list_models(settings):
+            print(model)
+    elif prompt is not None:
+        async for text in reply(prompt, config, settings=settings):
+            print(text, end="", flush=True)
+        print()
 
 
 def main() -> None:
@@ -50,14 +44,15 @@ def main() -> None:
 
     try:
         settings = Settings()
+        config = ModelConfig()
         if args.stream is not None:
-            settings.stream = args.stream
-        asyncio.run(run(args.prompt, list_models=args.list_models, settings=settings))
+            config.stream = args.stream
+        asyncio.run(
+            run(args.prompt, list_models=args.list_models, settings=settings, config=config)
+        )
     except ValidationError as exc:
         fields = ", ".join(".".join(map(str, error["loc"])) for error in exc.errors())
-        parser.exit(2, f"Configurazione non valida: controlla {fields} in model.toml o .env.\n")
-    except TOMLDecodeError as exc:
-        parser.exit(2, f"Errore in model.toml: {exc}\n")
+        parser.exit(2, f"Configurazione non valida: controlla {fields} in ModelConfig o .env.\n")
     except APIConnectionError:
         parser.exit(1, "Connessione fallita: verifica Tailscale, LLM_BASE_URL e LLM_TIMEOUT.\n")
     except (APIStatusError, AgentRunError, UserError) as exc:
