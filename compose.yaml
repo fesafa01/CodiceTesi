@@ -1,0 +1,8 @@
+services:
+  app:
+    image: codice-tesi:local
+    build: .
+    init: true
+    env_file:
+      - path: .env
+        required: false

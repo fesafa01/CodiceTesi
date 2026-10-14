@@ -12,21 +12,46 @@ valutazione di fedeltà, completezza, tracciabilità e latenza saranno sviluppat
 nelle fasi successive. L'accesso via Tailscale è la modalità di sviluppo remoto;
 non dimostra da solo il controllo sull'intera catena di inferenza.
 
-## Avvio
+## Avvio con un solo comando
 
-Requisiti: Python 3.13, [uv](https://docs.astral.sh/uv/) e Tailscale con accesso al server.
-Eseguire dalla radice di questa repository:
+Dalla cartella `CodiceTesi/`, con Docker Desktop o Docker Engine e Compose attivi:
 
 ```bash
-uv sync --locked
-uv run tesi-agent --list-models
-uv run tesi-agent "Rispondi brevemente: qual è il tuo compito?"
-uv run tesi-agent --no-stream "Rispondi soltanto: OK"
+docker compose run --build --rm app
 ```
 
-La risposta viene mostrata progressivamente per default. `--no-stream` attende
-la risposta completa; `--stream` forza lo streaming se disabilitato in Python.
+Il comando costruisce l'immagine e mostra i comandi disponibili. Il container
+termina dopo l'esecuzione. Tutte le operazioni passano da `main.py`, che delega
+a `src/codice_tesi/main.py`:
 
+```bash
+docker compose run --build --rm app modelli
+docker compose run --build --rm app agente "Rispondi soltanto: OK" --no-stream
+```
+
+`Dockerfile` produce una sola immagine applicativa, con Python 3.13, dipendenze
+bloccate in `uv.lock` e codice. Il container usa un utente senza privilegi.
+
+Il file `.env` è facoltativo e viene passato al container da Compose; credenziali,
+`.venv` e Git sono esclusi dal contesto di build tramite `.dockerignore`.
+Per `agente` e `modelli` il server LLM sul DGX deve essere già attivo e raggiungibile
+anche dal container tramite Tailscale. Questo Compose avvia il prototipo Python;
+il server di inferenza rimane esterno.
+
+## Avvio locale
+
+Requisiti: Python 3.13 e [uv](https://docs.astral.sh/uv/).
+Dalla cartella `CodiceTesi/`, lo stesso entry point si avvia con:
+
+```bash
+uv run --locked --no-editable python main.py
+uv run --locked --no-editable python main.py agente "Rispondi soltanto: OK"
+```
+
+Il comando installato `tesi-agent` richiama la stessa funzione di avvio,
+per esempio `uv run --no-editable tesi-agent modelli`.
+La risposta del modello viene mostrata progressivamente per default.
+`--no-stream` attende la risposta completa; `--stream` forza lo streaming.
 Su macOS, l'attributo `hidden` applicato ricorsivamente a `.venv` può far ignorare
 a Python i file `.pth` dell'installazione editable, causando
 `ModuleNotFoundError: No module named 'codice_tesi'`. Per ripristinarli:
@@ -87,7 +112,7 @@ Questi sono anche i valori predefiniti: `.env` serve solo per modificarli.
 argomenti Python, variabili d'ambiente, `.env`, default del codice. Per esempio:
 
 ```bash
-LLM_TIMEOUT=60 uv run tesi-agent "Rispondi soltanto: OK"
+LLM_TIMEOUT=60 uv run --no-editable python main.py agente "Rispondi soltanto: OK"
 ```
 
 I parametri di `ModelConfig` vengono letti esclusivamente dal codice Python.
@@ -110,7 +135,7 @@ che PydanticAI usa per comunicare con il DGX:
 
 Il client SDK esegue le richieste HTTP e legge le risposte JSON o gli eventi SSE
 di streaming. PydanticAI gestisce il ciclo dell'agente e le eventuali chiamate ai tool.
-`argparse` in `cli.py` legge esclusivamente gli argomenti del terminale;
+`argparse` in `src/codice_tesi/main.py` legge esclusivamente gli argomenti del terminale;
 gli `add_argument` non definiscono richieste HTTP.
 
 ## Uso da Python
@@ -149,7 +174,8 @@ abilita telemetria dell'agente. Per le prove iniziali usare testi sintetici.
 
 Il codice è in `src/codice_tesi/`: `config.py` gestisce la configurazione,
 `api.py` raccoglie il client e l'adattatore HTTP, `agent.py` costruisce l'agente
-e produce le risposte, `cli.py` legge gli argomenti e stampa i risultati.
+e produce le risposte. `main.py` coordina i comandi; `cli.py` stampa le risposte
+del modello.
 Le dipendenze sono in `pyproject.toml` e bloccate in `uv.lock`, da versionare insieme.
 
 ```bash
@@ -160,3 +186,14 @@ uv run ruff format --check .
 
 I test usano un endpoint simulato e non richiedono Tailscale.
 L'integrazione segue la [documentazione PydanticAI per API compatibili](https://pydantic.dev/docs/ai/models/compatible-apis/).
+
+## Dataset clinico sintetico
+
+[Il mock v1](data/mock_clinico/v1/README.md) contiene due pazienti con ricoveri
+chirurgici correnti e diciotto documenti, quindici correnti e tre precedenti.
+L'[indice dei casi](data/mock_clinico/v1/pazienti/README.md) conduce alle cartelle
+dei pazienti: per ogni episodio, vista strutturata e fonti sono raccolte insieme.
+Il catalogo distingue la consultazione nella cartella da quella nel CDR.
+
+Tutti i contenuti sono inventati per lo sviluppo. Il dataset rimane disponibile
+come insieme di file; non è collegato al codice applicativo o all'agente.

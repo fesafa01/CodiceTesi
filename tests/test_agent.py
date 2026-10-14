@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 from pydantic import ValidationError
 from pydantic_ai.exceptions import UserError
 
-from codice_tesi import api, cli
+from codice_tesi import api, cli, main
 from codice_tesi.agent import create_agent, reply
 from codice_tesi.config import ModelConfig, Settings
 
@@ -180,9 +180,9 @@ def test_connection_failure_has_actionable_message(monkeypatch, capsys):
         raise httpx.ConnectError("Connection refused", request=request)
 
     monkeypatch.setattr(api, "create_client", lambda settings: mock_client(handler))
-    monkeypatch.setattr(sys, "argv", ["tesi-agent", "--list-models"])
+    monkeypatch.setattr(sys, "argv", ["tesi-agent", "modelli"])
     with pytest.raises(SystemExit) as exc:
-        cli.main()
+        main.main()
     assert exc.value.code == 1
     error = capsys.readouterr().err
     assert "Tailscale" in error
@@ -227,8 +227,10 @@ def test_cli_streams_by_default_and_can_disable_it(monkeypatch, capsys, stream):
         )
 
     monkeypatch.setattr(api, "create_client", lambda settings: mock_client(handler))
-    monkeypatch.setattr(sys, "argv", ["tesi-agent", "Saluta"] + ([] if stream else ["--no-stream"]))
-    cli.main()
+    monkeypatch.setattr(
+        sys, "argv", ["tesi-agent", "agente", "Saluta"] + ([] if stream else ["--no-stream"])
+    )
+    main.main()
     assert capsys.readouterr().out == "Ciao mondo\n"
 
 

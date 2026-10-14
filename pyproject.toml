@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-tesi-agent = "codice_tesi.cli:main"
+tesi-agent = "codice_tesi.main:main"
 
 [tool.ruff]
 target-version = "py313"
