@@ -208,6 +208,9 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# Database e stato locale del backend sintetico
+/var/
+
 # PyPI configuration file
 .pypirc
 

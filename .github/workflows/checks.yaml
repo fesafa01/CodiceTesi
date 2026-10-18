@@ -1,0 +1,33 @@
+name: Checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: clinical_test
+          POSTGRES_USER: clinical_test
+          POSTGRES_PASSWORD: synthetic_test_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clinical_test -d clinical_test"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      CLINICAL_TEST_POSTGRES_URL: postgresql://clinical_test:synthetic_test_only@127.0.0.1:5432/clinical_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.19"
+          enable-cache: true
+      - run: uv sync --locked --extra backend --no-editable --python 3.13
+      - run: uv run --locked --extra backend --no-editable ruff check .
+      - run: uv run --locked --extra backend --no-editable ruff format --check .
+      - run: uv run --locked --extra backend --no-editable pytest -q

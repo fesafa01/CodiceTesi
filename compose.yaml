@@ -6,3 +6,84 @@ services:
     env_file:
       - path: .env
         required: false
+
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: clinico
+      POSTGRES_USER: clinico
+      # Credenziali esclusivamente del simulatore locale con dati sintetici.
+      POSTGRES_PASSWORD: clinico_sintetico
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - clinical-db:/var/lib/postgresql/data
+      - ./docker/postgres/01-reader.sql:/docker-entrypoint-initdb.d/01-reader.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clinico -d clinico"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend-init:
+    image: codice-tesi-backend:local
+    build:
+      context: .
+      target: backend
+    command: ["init"]
+    environment: &clinical-environment
+      CLINICAL_DATABASE_URL: postgresql://clinico:clinico_sintetico@db:5432/clinico
+      CLINICAL_HOST: 0.0.0.0
+    depends_on:
+      db:
+        condition: service_healthy
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+
+  backend:
+    image: codice-tesi-backend:local
+    build:
+      context: .
+      target: backend
+    init: true
+    environment:
+      <<: *clinical-environment
+      CLINICAL_DATABASE_URL: postgresql://clinical_reader:lettura_sintetica@db:5432/clinico
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      backend-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  backend-control:
+    profiles: ["tools"]
+    image: codice-tesi-backend:local
+    build:
+      context: .
+      target: backend
+    command: ["scenario", "status"]
+    environment: *clinical-environment
+    depends_on:
+      backend-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  clinical-db:
+    # Persistenza dello schema e degli eventuali dataset importati esplicitamente.
+    name: codicetesi_clinical-db-v2

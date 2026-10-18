@@ -1,0 +1,465 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mxfile host="app.diagrams.net" agent="CodiceTesi UML" type="device">
+  <diagram id="page-1" name="Componenti applicative" umlDiagramType="ComponentDiagram">
+    <mxGraphModel page="1" pageWidth="1800" pageHeight="1360" grid="1" gridSize="10">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="text-1" value="Applicazione attuale: componenti" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=34;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="25" width="546.0" height="42" />
+        </mxCell>
+        <mxCell id="text-2" value="Stato del 17 ottobre 2026 · UML · Agente e backend sono due percorsi applicativi indipendenti" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=22;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="78" width="909.96875" height="30" />
+        </mxCell>
+        <mxCell id="agent" value="" parent="1" vertex="1" umlType="Package" style="shape=folder;tabWidth=154.0;tabHeight=40;container=1;collapsible=0;fillColor=#f4f7fb;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="150" width="430" height="720" />
+        </mxCell>
+        <mxCell id="text-3" value="Agente CLI" parent="agent" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="15" y="8" width="400" height="31" />
+        </mxCell>
+        <mxCell id="agent-cli" value="" parent="agent" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="30" y="65" width="370" height="130" />
+        </mxCell>
+        <mxCell id="text-4" value="«component»" parent="agent-cli" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="346" height="27" />
+        </mxCell>
+        <mxCell id="text-5" value="Comandi tesi-agent" parent="agent-cli" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="346" height="31" />
+        </mxCell>
+        <mxCell id="text-6" value="main.py / cli.py" parent="agent-cli" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="346" height="27" />
+        </mxCell>
+        <mxCell id="pydantic-ai" value="" parent="agent" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="30" y="265" width="370" height="130" />
+        </mxCell>
+        <mxCell id="text-7" value="«component»" parent="pydantic-ai" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="346" height="27" />
+        </mxCell>
+        <mxCell id="text-8" value="Agente PydanticAI" parent="pydantic-ai" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="346" height="31" />
+        </mxCell>
+        <mxCell id="text-9" value="Istruzioni e generazione" parent="pydantic-ai" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="346" height="27" />
+        </mxCell>
+        <mxCell id="sdk" value="" parent="agent" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="30" y="490" width="370" height="130" />
+        </mxCell>
+        <mxCell id="text-10" value="«component»" parent="sdk" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="346" height="27" />
+        </mxCell>
+        <mxCell id="text-11" value="Client OpenAI-compatible" parent="sdk" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="346" height="31" />
+        </mxCell>
+        <mxCell id="text-12" value="SDK e configurazione LLM" parent="sdk" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="346" height="27" />
+        </mxCell>
+        <mxCell id="clinical" value="" parent="1" vertex="1" umlType="Package" style="shape=folder;tabWidth=207.0;tabHeight=40;container=1;collapsible=0;fillColor=#f4f7fb;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="550" y="150" width="660" height="720" />
+        </mxCell>
+        <mxCell id="text-13" value="Backend clinico" parent="clinical" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="15" y="8" width="630" height="31" />
+        </mxCell>
+        <mxCell id="api" value="" parent="clinical" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="50" y="65" width="560" height="135" />
+        </mxCell>
+        <mxCell id="text-14" value="«component»" parent="api" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="536" height="27" />
+        </mxCell>
+        <mxCell id="text-15" value="API REST e FHIR R4B" parent="api" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="536" height="31" />
+        </mxCell>
+        <mxCell id="text-16" value="FastAPI, Uvicorn e console Swagger" parent="api" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="536" height="27" />
+        </mxCell>
+        <mxCell id="mapper" value="" parent="clinical" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="35" y="285" width="270" height="140" />
+        </mxCell>
+        <mxCell id="text-17" value="«component»" parent="mapper" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="246" height="27" />
+        </mxCell>
+        <mxCell id="text-18" value="Adattatore FHIR" parent="mapper" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="246" height="31" />
+        </mxCell>
+        <mxCell id="text-19" value="Risorse e validazione&lt;br&gt;Pydantic / fhir.resources" parent="mapper" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="246" height="54" />
+        </mxCell>
+        <mxCell id="repo" value="" parent="clinical" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="360" y="285" width="270" height="140" />
+        </mxCell>
+        <mxCell id="text-20" value="«component»" parent="repo" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="246" height="27" />
+        </mxCell>
+        <mxCell id="text-21" value="Repository clinico" parent="repo" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="246" height="31" />
+        </mxCell>
+        <mxCell id="text-22" value="Contesto, canali,&lt;br&gt;versioni e visibilità" parent="repo" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="246" height="54" />
+        </mxCell>
+        <mxCell id="orm" value="" parent="clinical" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="200" y="535" width="360" height="130" />
+        </mxCell>
+        <mxCell id="text-23" value="«component»" parent="orm" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="336" height="27" />
+        </mxCell>
+        <mxCell id="text-24" value="Accesso PostgreSQL" parent="orm" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="336" height="31" />
+        </mxCell>
+        <mxCell id="text-25" value="Pool Psycopg e query SQL" parent="orm" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="336" height="27" />
+        </mxCell>
+        <mxCell id="data" value="" parent="1" vertex="1" umlType="Package" style="shape=folder;tabWidth=227.0;tabHeight=40;container=1;collapsible=0;fillColor=#f4f7fb;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="1300" y="150" width="460" height="720" />
+        </mxCell>
+        <mxCell id="text-26" value="Persistenza e dati" parent="data" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="15" y="8" width="430" height="31" />
+        </mxCell>
+        <mxCell id="db" value="" parent="data" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="50" y="285" width="360" height="155" />
+        </mxCell>
+        <mxCell id="text-27" value="«component»" parent="db" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="336" height="27" />
+        </mxCell>
+        <mxCell id="text-28" value="Database clinico" parent="db" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="336" height="31" />
+        </mxCell>
+        <mxCell id="text-29" value="Pazienti, episodi, fonti,&lt;br&gt;misure, PDF e simulazione" parent="db" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="336" height="54" />
+        </mxCell>
+        <mxCell id="dataset" value="" parent="data" vertex="1" umlType="Artifact" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="50" y="540" width="360" height="135" />
+        </mxCell>
+        <mxCell id="text-30" value="«artifact»" parent="dataset" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="336" height="27" />
+        </mxCell>
+        <mxCell id="text-31" value="Dataset esterno" parent="dataset" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="336" height="31" />
+        </mxCell>
+        <mxCell id="text-32" value="Importazione esplicita&lt;br&gt;Nessun caso distribuito" parent="dataset" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="336" height="54" />
+        </mxCell>
+        <mxCell id="llm" value="" parent="1" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="70" y="1010" width="370" height="145" />
+        </mxCell>
+        <mxCell id="text-33" value="«component»" parent="llm" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="346" height="27" />
+        </mxCell>
+        <mxCell id="text-34" value="Server LLM remoto" parent="llm" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="346" height="31" />
+        </mxCell>
+        <mxCell id="text-35" value="API su spark-413e&lt;br&gt;Connessione via Tailscale" parent="llm" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="346" height="54" />
+        </mxCell>
+        <mxCell id="ops" value="" parent="1" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="570" y="1010" width="390" height="145" />
+        </mxCell>
+        <mxCell id="text-36" value="«component»" parent="ops" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="366" height="27" />
+        </mxCell>
+        <mxCell id="text-37" value="CLI operativa backend" parent="ops" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="366" height="31" />
+        </mxCell>
+        <mxCell id="text-38" value="Schema e importazione&lt;br&gt;Controllo degli scenari" parent="ops" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="366" height="54" />
+        </mxCell>
+        <mxCell id="tests" value="" parent="1" vertex="1" umlType="Component" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="1330" y="1010" width="390" height="145" />
+        </mxCell>
+        <mxCell id="text-39" value="«component»" parent="tests" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="366" height="27" />
+        </mxCell>
+        <mxCell id="text-40" value="Test e integrazione continua" parent="tests" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="366" height="31" />
+        </mxCell>
+        <mxCell id="text-41" value="pytest, Ruff e workflow GitHub" parent="tests" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="366" height="27" />
+        </mxCell>
+        <mxCell id="text-42" edge="1" parent="1" source="agent-cli" target="pydantic-ai" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.5;exitY=1.0;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-43" edge="1" parent="1" source="pydantic-ai" target="sdk" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.5;exitY=1.0;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-44" edge="1" parent="1" source="sdk" target="llm" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.5;exitY=1.0;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-45" value="HTTP / OpenAI" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=18;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="275" y="935" width="128.0" height="26" />
+        </mxCell>
+        <mxCell id="text-46" edge="1" parent="1" source="api" target="mapper" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.21428571428571427;exitY=1.0;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-47" edge="1" parent="1" source="api" target="repo" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.7946428571428571;exitY=1.0;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-48" edge="1" parent="1" source="mapper" target="repo" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=1.0;exitY=0.5;exitPerimeter=0;entryX=0.0;entryY=0.5;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-49" edge="1" parent="1" source="repo" target="orm" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.5;exitY=1.0;exitPerimeter=0;entryX=0.8194444444444444;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-50" edge="1" parent="1" source="orm" target="db" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=1.0;exitY=0.5;exitPerimeter=0;entryX=0.0;entryY=0.5483870967741935;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="1250" y="750" />
+              <mxPoint x="1250" y="520" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-51" edge="1" parent="1" source="ops" target="db" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=1.0;exitY=0.20689655172413793;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="1270" y="1040" />
+              <mxPoint x="1270" y="385" />
+              <mxPoint x="1530" y="385" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-52" edge="1" parent="1" source="ops" target="dataset" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=1.0;exitY=0.7586206896551724;exitPerimeter=0;entryX=0.0;entryY=0.7407407407407407;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="1230" y="1120" />
+              <mxPoint x="1230" y="790" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-53" edge="1" parent="1" source="tests" target="api" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.0;exitY=0.5517241379310345;exitPerimeter=0;entryX=0.9107142857142857;entryY=1.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="1200" y="1090" />
+              <mxPoint x="1200" y="385" />
+              <mxPoint x="1110" y="385" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-54" edge="1" parent="1" source="tests" target="pydantic-ai" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.20512820512820512;exitY=1.0;exitPerimeter=0;entryX=1.0;entryY=0.5;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="1410" y="1220" />
+              <mxPoint x="495" y="1220" />
+              <mxPoint x="495" y="480" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-55" value="Dipendenza UML: tratteggio con freccia dal componente che usa a quello utilizzato." parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=21;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="45" y="1270" width="805.0" height="29" />
+        </mxCell>
+        <mxCell id="text-56" value="Il repository è riusabile dai futuri tool senza HTTP. Non è presente un’interfaccia clinica per il medico." parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=21;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="45" y="1305" width="971.96875" height="29" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="page-2" name="Distribuzione Docker" umlDiagramType="DeploymentDiagram">
+    <mxGraphModel page="1" pageWidth="1800" pageHeight="1360" grid="1" gridSize="10">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="text-1" value="Applicazione attuale: distribuzione" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=34;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="25" width="564.0" height="42" />
+        </mxCell>
+        <mxCell id="text-2" value="UML · Configurazione Docker Compose · Servizi su richiesta e infrastruttura esterna sono indicati esplicitamente" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=22;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="78" width="1085.984375" height="30" />
+        </mxCell>
+        <mxCell id="host" value="" parent="1" vertex="1" umlType="Device" style="rounded=0;container=1;collapsible=0;fillColor=#f4f7fb;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="150" width="1240" height="1040" />
+        </mxCell>
+        <mxCell id="text-3" value="«device» Host di sviluppo" parent="host" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="15" y="12" width="1210" height="31" />
+        </mxCell>
+        <mxCell id="docker" value="" parent="host" vertex="1" umlType="ExecutionEnvironment" style="rounded=0;container=1;collapsible=0;fillColor=#f4f7fb;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="30" y="70" width="1180" height="930" />
+        </mxCell>
+        <mxCell id="text-4" value="«executionEnvironment» Docker Engine / Compose" parent="docker" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="15" y="12" width="1150" height="31" />
+        </mxCell>
+        <mxCell id="app" value="" parent="docker" vertex="1" umlType="Node" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="90" width="330" height="155" />
+        </mxCell>
+        <mxCell id="text-5" value="«executionEnvironment»" parent="app" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="306" height="27" />
+        </mxCell>
+        <mxCell id="text-6" value="Container app" parent="app" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="306" height="31" />
+        </mxCell>
+        <mxCell id="text-7" value="tesi-agent&lt;br&gt;Avvio su richiesta" parent="app" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="306" height="54" />
+        </mxCell>
+        <mxCell id="backend" value="" parent="docker" vertex="1" umlType="Node" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="500" y="90" width="380" height="170" />
+        </mxCell>
+        <mxCell id="text-8" value="«executionEnvironment»" parent="backend" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="356" height="27" />
+        </mxCell>
+        <mxCell id="text-9" value="Container backend" parent="backend" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="356" height="31" />
+        </mxCell>
+        <mxCell id="text-10" value="tesi-backend serve&lt;br&gt;Ruolo DB: clinical_reader" parent="backend" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="356" height="54" />
+        </mxCell>
+        <mxCell id="init" value="" parent="docker" vertex="1" umlType="Node" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="370" width="330" height="155" />
+        </mxCell>
+        <mxCell id="text-11" value="«executionEnvironment»" parent="init" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="306" height="27" />
+        </mxCell>
+        <mxCell id="text-12" value="Container backend-init" parent="init" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="306" height="31" />
+        </mxCell>
+        <mxCell id="text-13" value="Solo schema SQL&lt;br&gt;Nessuna importazione" parent="init" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="306" height="54" />
+        </mxCell>
+        <mxCell id="control" value="" parent="docker" vertex="1" umlType="Node" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="40" y="680" width="330" height="155" />
+        </mxCell>
+        <mxCell id="text-14" value="«executionEnvironment»" parent="control" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="306" height="27" />
+        </mxCell>
+        <mxCell id="text-15" value="Container backend-control" parent="control" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="306" height="31" />
+        </mxCell>
+        <mxCell id="text-16" value="Importazione e scenari&lt;br&gt;Avvio su richiesta" parent="control" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="306" height="54" />
+        </mxCell>
+        <mxCell id="db" value="" parent="docker" vertex="1" umlType="Node" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="500" y="440" width="380" height="160" />
+        </mxCell>
+        <mxCell id="text-17" value="«executionEnvironment»" parent="db" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="356" height="27" />
+        </mxCell>
+        <mxCell id="text-18" value="Container db" parent="db" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="356" height="31" />
+        </mxCell>
+        <mxCell id="text-19" value="PostgreSQL 17&lt;br&gt;Amministrazione: clinico" parent="db" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="356" height="54" />
+        </mxCell>
+        <mxCell id="data" value="" parent="docker" vertex="1" umlType="Artifact" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="930" y="440" width="220" height="155" />
+        </mxCell>
+        <mxCell id="text-20" value="«artifact»" parent="data" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="196" height="27" />
+        </mxCell>
+        <mxCell id="text-21" value="Input esterno" parent="data" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="196" height="31" />
+        </mxCell>
+        <mxCell id="text-22" value="Mount esplicito&lt;br&gt;per importazione" parent="data" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="196" height="54" />
+        </mxCell>
+        <mxCell id="volume" value="" parent="docker" vertex="1" umlType="Artifact" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="500" y="720" width="380" height="130" />
+        </mxCell>
+        <mxCell id="text-23" value="«artifact»" parent="volume" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="356" height="27" />
+        </mxCell>
+        <mxCell id="text-24" value="Volume clinical-db" parent="volume" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="356" height="31" />
+        </mxCell>
+        <mxCell id="text-25" value="Persistenza tra i riavvii" parent="volume" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="356" height="27" />
+        </mxCell>
+        <mxCell id="remote" value="" parent="1" vertex="1" umlType="Node" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="1350" y="310" width="400" height="180" />
+        </mxCell>
+        <mxCell id="text-26" value="«executionEnvironment»" parent="remote" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="376" height="27" />
+        </mxCell>
+        <mxCell id="text-27" value="Ambiente inferenza remoto" parent="remote" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="376" height="31" />
+        </mxCell>
+        <mxCell id="text-28" value="spark-413e / server LLM&lt;br&gt;API OpenAI-compatible" parent="remote" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="376" height="54" />
+        </mxCell>
+        <mxCell id="ci" value="" parent="1" vertex="1" umlType="Node" style="rounded=0;container=1;collapsible=0;fillColor=#ffffff;strokeWidth=2;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="1350" y="900" width="400" height="155" />
+        </mxCell>
+        <mxCell id="text-29" value="«executionEnvironment»" parent="ci" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="10" width="376" height="27" />
+        </mxCell>
+        <mxCell id="text-30" value="Runner GitHub Actions" parent="ci" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=23;fontStyle=1;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="42" width="376" height="31" />
+        </mxCell>
+        <mxCell id="text-31" value="Workflow configurato&lt;br&gt;Test con PostgreSQL isolato" parent="ci" vertex="1" umlType="Label" style="text;whiteSpace=wrap;align=center;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="12" y="79" width="376" height="54" />
+        </mxCell>
+        <mxCell id="text-32" edge="1" parent="1" source="app" target="remote" umlType="CommunicationPath" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=none;exitX=1.0;exitY=0.5161290322580645;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="495" y="390" />
+              <mxPoint x="495" y="270" />
+              <mxPoint x="1550" y="270" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-33" value="HTTP su Tailscale" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=18;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="1360" y="235" width="151.984375" height="26" />
+        </mxCell>
+        <mxCell id="text-34" edge="1" parent="1" source="backend" target="db" umlType="CommunicationPath" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=none;exitX=0.5;exitY=1.0;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-35" value="TCP 5432 / lettura" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=18;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="780" y="555" width="151.0" height="26" />
+        </mxCell>
+        <mxCell id="text-36" edge="1" parent="1" source="init" target="db" umlType="CommunicationPath" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=none;exitX=1.0;exitY=0.5806451612903226;exitPerimeter=0;entryX=0.0;entryY=0.28125;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="510" y="680" />
+              <mxPoint x="510" y="705" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-37" edge="1" parent="1" source="control" target="db" umlType="CommunicationPath" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=none;exitX=1.0;exitY=0.4838709677419355;exitPerimeter=0;entryX=0.0;entryY=0.6875;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="510" y="975" />
+              <mxPoint x="510" y="770" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-38" edge="1" parent="1" source="control" target="data" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=1.0;exitY=0.7741935483870968;exitPerimeter=0;entryX=0.5;entryY=1.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points">
+              <mxPoint x="480" y="1020" />
+              <mxPoint x="480" y="850" />
+              <mxPoint x="1110" y="850" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-39" edge="1" parent="1" source="db" target="volume" umlType="Dependency" style="edgeStyle=segmentEdgeStyle;rounded=0;html=1;strokeColor=#243247;strokeWidth=2;endArrow=open;dashed=1;exitX=0.5;exitY=1.0;exitPerimeter=0;entryX=0.5;entryY=0.0;entryPerimeter=0;">
+          <mxGeometry as="geometry" relative="1">
+            <Array as="points" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="text-40" value="Persistenza" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=18;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="780" y="870" width="99.0" height="26" />
+        </mxCell>
+        <mxCell id="text-41" value="HTTP: 127.0.0.1:8001" parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=19;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="805" y="495" width="196.0" height="27" />
+        </mxCell>
+        <mxCell id="text-42" value="Linea continua senza freccia: comunicazione tra ambienti. Tratteggio: dipendenza da un artefatto." parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=21;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="45" y="1220" width="939.984375" height="29" />
+        </mxCell>
+        <mxCell id="text-43" value="Avvio senza dati clinici. PostgreSQL locale: 127.0.0.1:5433." parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=21;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="45" y="1255" width="575.984375" height="29" />
+        </mxCell>
+        <mxCell id="text-44" value="Importazione su richiesta. I futuri tool potranno usare il repository senza HTTP; non sono ancora collegati." parent="1" vertex="1" umlType="Comment" style="text;whiteSpace=wrap;align=left;verticalAlign=top;spacing=0;fontSize=21;fontStyle=0;html=1;fontFamily=Arial;fontColor=#243247;">
+          <mxGeometry as="geometry" x="45" y="1290" width="1017.0" height="29" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

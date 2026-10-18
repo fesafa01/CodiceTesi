@@ -7,10 +7,26 @@ sistema eseguibile on-premise, con output verificabili e revisione professionale
 
 Il primo componente è un agente **PydanticAI** che invia richieste all'API
 OpenAI-compatible del server `spark-413e`, raggiungibile tramite **Tailscale**.
-Questa è una base sperimentale: integrazioni cliniche, strumenti dell'agente e
-valutazione di fedeltà, completezza, tracciabilità e latenza saranno sviluppati
-nelle fasi successive. L'accesso via Tailscale è la modalità di sviluppo remoto;
+È disponibile anche un **backend clinico sintetico FastAPI**, con PostgreSQL,
+importazione esplicita di dataset esterni e risorse FHIR R4B. Dopo la pulizia
+dei dati il servizio parte vuoto. Il collegamento dei suoi
+endpoint agli strumenti dell'agente e la valutazione di fedeltà, completezza,
+tracciabilità e latenza sono i passi successivi.
+L'accesso via Tailscale è la modalità di sviluppo remoto;
 non dimostra da solo il controllo sull'intera catena di inferenza.
+
+## Backend clinico
+
+```bash
+docker compose up --build -d backend
+```
+
+L'API è disponibile su <http://localhost:8001/docs>. Compose inizializza il
+database creando soltanto le tabelle; nessun dato clinico viene caricato
+automaticamente. Gli elenchi iniziali sono vuoti. Gli eventuali dataset esterni
+importati esplicitamente persistono in un volume Docker.
+La [guida del backend](docs/backend.md) descrive entità, endpoint, scenari,
+avvio locale e verifiche. Il server LLM non è necessario per utilizzare il backend.
 
 ## Avvio con un solo comando
 
@@ -29,8 +45,8 @@ docker compose run --build --rm app modelli
 docker compose run --build --rm app agente "Rispondi soltanto: OK" --no-stream
 ```
 
-`Dockerfile` produce una sola immagine applicativa, con Python 3.13, dipendenze
-bloccate in `uv.lock` e codice. Il container usa un utente senza privilegi.
+`Dockerfile` produce immagini separate per agente e backend, con Python 3.13,
+dipendenze bloccate in `uv.lock` e utente senza privilegi.
 
 Il file `.env` è facoltativo e viene passato al container da Compose; credenziali,
 `.venv` e Git sono esclusi dal contesto di build tramite `.dockerignore`.
@@ -179,21 +195,31 @@ del modello.
 Le dipendenze sono in `pyproject.toml` e bloccate in `uv.lock`, da versionare insieme.
 
 ```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+uv run --locked --extra backend --no-editable pytest
+uv run --locked --extra backend --no-editable ruff check .
+uv run --locked --extra backend --no-editable ruff format --check .
 ```
 
-I test usano un endpoint simulato e non richiedono Tailscale.
+I test dell'agente usano un endpoint simulato e non richiedono Tailscale.
+I test del backend usano PostgreSQL: impostare `CLINICAL_TEST_POSTGRES_URL`
+su un database di test. Senza questa variabile i test che richiedono il DB
+sono saltati; il workflow GitHub Actions la configura esplicitamente.
 L'integrazione segue la [documentazione PydanticAI per API compatibili](https://pydantic.dev/docs/ai/models/compatible-apis/).
 
-## Dataset clinico sintetico
+## Dati clinici
 
-[Il mock v1](data/mock_clinico/v1/README.md) contiene due pazienti con ricoveri
-chirurgici correnti e diciotto documenti, quindici correnti e tre precedenti.
-L'[indice dei casi](data/mock_clinico/v1/pazienti/README.md) conduce alle cartelle
-dei pazienti: per ogni episodio, vista strutturata e fonti sono raccolte insieme.
-Il catalogo distingue la consultazione nella cartella da quella nel CDR.
+La repository non distribuisce più i casi clinici generati. Il backend rimane
+avviabile senza dataset. Per caricare dati esterni nel contratto locale servono
+`--dataset-dir` o `CLINICAL_DATASET_DIR` e il comando esplicito `import-dataset`.
+`init` crea soltanto lo schema. Il loader locale non importa FHIR o CDA.
 
-Tutti i contenuti sono inventati per lo sviluppo. Il dataset rimane disponibile
-come insieme di file; non è collegato al codice applicativo o all'agente.
+La [guida dei dati](docs/dataset.md) descrive il contratto conservato.
+I test usano fixture minime temporanee, non cartelle
+cliniche distribuite. Gli strumenti clinici non sono ancora registrati nell'agente.
+
+## Diagrammi dell'applicazione attuale
+
+Il [draw.io UML](docs/diagrams/Applicazione_Attuale.drawio) contiene le viste delle
+[componenti](docs/diagrams/Applicazione_Componenti.png) e della
+[distribuzione Docker](docs/diagrams/Applicazione_Deployment.png).
+L'[indice dei diagrammi](docs/diagrams/README.md) descrive notazione e rigenerazione.

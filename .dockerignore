@@ -11,3 +11,9 @@ tests
 dist
 build
 data
+var
+
+# Documentazione e strumenti offline non necessari alle immagini runtime.
+docs
+scripts
+.github

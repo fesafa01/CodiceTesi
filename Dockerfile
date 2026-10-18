@@ -8,15 +8,25 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable
 
-FROM python:3.13-slim AS runtime
+FROM builder AS backend-builder
+RUN uv sync --locked --no-dev --no-editable --extra backend
+
+FROM python:3.13-slim AS runtime-base
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYDANTIC_AI_NO_BANNER=1
 RUN useradd --uid 10001 --create-home app
+USER app
+
+FROM runtime-base AS backend
+COPY --from=backend-builder /app/.venv /app/.venv
+ENTRYPOINT ["tesi-backend"]
+CMD ["serve"]
+
+FROM runtime-base AS runtime
 COPY --from=builder /app/.venv /app/.venv
 COPY main.py ./
-USER app
 ENTRYPOINT ["python", "/app/main.py"]
 CMD ["--help"]
