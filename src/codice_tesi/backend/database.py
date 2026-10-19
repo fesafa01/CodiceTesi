@@ -1,14 +1,43 @@
-"""Pool PostgreSQL asincrono e schema SQL esplicito, condivisi da API e futuri tool."""
+"""Configurazione, pool PostgreSQL e schema dei contesti documentali."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from psycopg import AsyncConnection, sql
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from codice_tesi.backend.config import BackendSettings
+
+class BackendSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="CLINICAL_", env_file=".env", extra="ignore")
+
+    database_url: SecretStr = SecretStr(
+        "postgresql://clinico:clinico_sintetico@127.0.0.1:5433/clinico"
+    )
+    database_schema: str = Field(default="public", pattern=r"^[a-z_][a-z0-9_]{0,62}$")
+    pool_min_size: int = Field(default=1, ge=1, le=20)
+    pool_max_size: int = Field(default=4, ge=1, le=20)
+    pool_timeout: float = Field(default=5, gt=0, le=60)
+    host: str = "127.0.0.1"
+    port: int = Field(default=8001, ge=1, le=65535)
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+
+    @field_validator("database_url")
+    @classmethod
+    def postgresql_url(cls, value: SecretStr):
+        if not value.get_secret_value().startswith(("postgresql://", "postgres://")):
+            raise ValueError("Usare una stringa PostgreSQL nativa, senza driver SQLAlchemy.")
+        return value
+
+    @model_validator(mode="after")
+    def pool_bounds(self):
+        if self.pool_max_size < self.pool_min_size:
+            raise ValueError("Il massimo del pool non può essere inferiore al minimo.")
+        return self
 
 
 class Database:
@@ -48,7 +77,7 @@ class Database:
     async def connection(self, *, read_only: bool = False) -> AsyncIterator[AsyncConnection]:
         async with self.pool.connection() as connection, connection.transaction():
             if read_only:
-                # Stato, versioni e misure della stessa lettura usano uno snapshot coerente.
+                # Contesto e fonti della stessa lettura usano uno snapshot coerente.
                 await connection.execute(
                     "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
                 )

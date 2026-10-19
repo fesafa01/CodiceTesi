@@ -180,10 +180,8 @@ dependencies = [
 [package.optional-dependencies]
 backend = [
     { name = "fastapi" },
-    { name = "fhir-resources" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
-    { name = "pypdf" },
     { name = "uvicorn" },
 ]
 
@@ -198,14 +196,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'backend'", specifier = ">=0.115,<1" },
-    { name = "fhir-resources", marker = "extra == 'backend'", specifier = ">=8,<9" },
     { name = "openai", specifier = ">=3.29.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'backend'", specifier = ">=3.2,<4" },
     { name = "psycopg-pool", marker = "extra == 'backend'", specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.14.1" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.55.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
-    { name = "pypdf", marker = "extra == 'backend'", specifier = ">=6,<7" },
     { name = "uvicorn", marker = "extra == 'backend'", specifier = ">=0.30,<1" },
 ]
 provides-extras = ["backend"]
@@ -242,30 +238,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/19/f5/4bbb2df9bb6f365151f2c02795ca3f17f78d08e670a394df963f3d8881ce/fastapi-0.143.2.tar.gz", hash = "sha256:e9e6d97018dcfd748da7d9e7c61cedefbe9eb91b1a3288e45b13fbae76df2d54", size = 468920, upload-time = "2026-10-15T13:34:21.679Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d5/5a/9a5fd06659a63e13e876dd660347c044b3954ede3db928c69df879fac02c/fastapi-0.143.2-py3-none-any.whl", hash = "sha256:da2fe9893b7392ebce76d8c8511e3fa43e5a25f5852103aa2eee7cff3ab80b75", size = 144690, upload-time = "2026-10-15T13:34:19.861Z" },
-]
-
-[[package]]
-name = "fhir-core"
-version = "1.1.11"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/02/7e/5beca7a70a87f5c2c541ca5196013df016eec4a8a018f90289d50cd7ea05/fhir_core-1.1.11.tar.gz", hash = "sha256:c726bd3da2b46292ddda5fa98330cde4707291ec33db8883779a2e0f539fec4b", size = 37609, upload-time = "2026-09-13T10:55:15.137Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b1/b5/1afdec83071f7a282284e0390af5b4e039340b0d1edace437652528891f8/fhir_core-1.1.11-py2.py3-none-any.whl", hash = "sha256:d41069bc9a683982e4caf87fa13f5e25c7ae2882c5ad53cdceaeb08af3d5024c", size = 31995, upload-time = "2026-09-13T10:55:13.896Z" },
-]
-
-[[package]]
-name = "fhir-resources"
-version = "8.3.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "fhir-core" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/98/06/331d78ad6db6903be6b912701c44b32af295279907b3a2e6ad6c2e2f97b1/fhir_resources-8.3.0.tar.gz", hash = "sha256:bdfd1c7bd1b89bfa269c1f435727771f6c632cd857e2848221713b3f8b9f46e8", size = 1617996, upload-time = "2026-07-03T15:23:54.01Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/86/32914542064b8aee77ac48142f8a1955df78da4eb905dd41697d26941d21/fhir_resources-8.3.0-py2.py3-none-any.whl", hash = "sha256:151e6c9b4336e36383cc2aaf2067a6f112a420fce1c7bd289182e55dd950871b", size = 2288069, upload-time = "2026-07-03T15:23:51.97Z" },
 ]
 
 [[package]]
@@ -782,15 +754,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
-]
-
-[[package]]
-name = "pypdf"
-version = "6.21.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d5/40/08cc87810195e5ee37a6917d4b19abc907c8def3a7ce265a81c7f5073304/pypdf-6.21.0.tar.gz", hash = "sha256:c16174c8653abafbe4d023b3c9227d226938d9579ffb5a73b4fac7756c0895a6", size = 7088285, upload-time = "2026-10-16T10:23:18.47Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/64/5cea5792cae22892a4ddba8ed9f7424c77b4cb49fdca5016bd62145c12c6/pypdf-6.21.0-py3-none-any.whl", hash = "sha256:3aec619699dacb1b73f57e87d9adaa4424814517b2cc028de20adba5a37af4c4", size = 405135, upload-time = "2026-10-16T10:23:16.38Z" },
 ]
 
 [[package]]

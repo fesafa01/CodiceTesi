@@ -8,9 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from codice_tesi.backend.app import create_app
-from codice_tesi.backend.composition_importer import import_ecream
-from codice_tesi.backend.composition_repository import save_dataset
 from codice_tesi.backend.database import Database
+from codice_tesi.backend.importer import import_ecream
+from codice_tesi.backend.repository import save_dataset
 from codice_tesi.discharge.models import Context, EvidenceSource
 
 

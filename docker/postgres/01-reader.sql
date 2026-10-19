@@ -1,4 +1,4 @@
--- Ruolo esclusivo del simulatore locale: nessun privilegio di scrittura per l'API.
+-- Ruolo del backend documentale: nessun privilegio di scrittura per l'API.
 CREATE ROLE clinical_reader LOGIN PASSWORD 'lettura_sintetica';
 GRANT CONNECT ON DATABASE clinico TO clinical_reader;
 GRANT USAGE ON SCHEMA public TO clinical_reader;

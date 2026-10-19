@@ -208,7 +208,7 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
-# Database e stato locale del backend sintetico
+# Database e stato locale del backend documentale
 /var/
 /output/dimissioni/
 

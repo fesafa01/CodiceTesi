@@ -23,13 +23,13 @@ uv run --locked --no-editable python main.py dimissione \
   --context-window 32768
 ```
 
-Il database di sviluppo è già popolato. Un nuovo database nasce vuoto: per
-importare il dataset pubblico eCREAM già scaricato, usare esplicitamente:
+Un nuovo database nasce vuoto. Per importare il dataset pubblico eCREAM
+già scaricato, usare esplicitamente:
 
 ```bash
 docker compose run --rm \
   -v "$PWD/../datasets_pubblici/ecream_gamma_span:/dataset:ro" \
-  backend-control import-ecream /dataset/notes.jsonl
+  backend-admin import-ecream /dataset/notes.jsonl
 ```
 
 Il server LLM dello Spark deve essere raggiungibile tramite Tailscale.
@@ -145,7 +145,14 @@ vanno aggiornati insieme; non servono migrazioni del database o nuove importazio
 Il JSONL eCREAM locale contiene 4.047 ID distinti, attualmente un testo per ID.
 L'importatore supporta più testi dello stesso `note_id`, deduplica quelli identici
 ripetuti per annotazioni e tiene separati ID diversi. Il raggruppamento documentale
-non attribuisce identità di paziente o episodio. Le API FHIR restano esterne al flusso.
+non attribuisce identità di paziente o episodio.
+
+Il backend segue soltanto eCREAM → PostgreSQL → pacchetto. `backend/app.py`
+espone le API, `database.py` contiene configurazione e connessioni, `repository.py`
+legge e salva i pacchetti, `importer.py` importa eCREAM e `cli.py` espone i tre
+comandi `init`, `import-ecream` e `serve`. Il simulatore clinico e le API FHIR
+sono stati rimossi. Le due tabelle documentali e i pacchetti `3.0` restano
+compatibili con i dati già importati; non serve reimportarli.
 
 ```bash
 uv run --locked --extra backend --no-editable pytest
@@ -159,4 +166,4 @@ Le chiavi di cache uv includono sorgenti e template per aggiornare il pacchetto
 anche con `--no-editable`. Le immagini usano `uv.lock` e un utente senza privilegi.
 
 La [guida del backend](docs/backend.md) documenta importazione e API.
-Il [contratto dei dati](docs/dataset.md) descrive il loader JSON/PDF opzionale.
+Il [contratto dei dati](docs/dataset.md) descrive raggruppamento e importazione eCREAM.

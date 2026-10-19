@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from codice_tesi.backend.datasets.ecream import load_ecream
+from codice_tesi.backend.importer import load_ecream
 from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
 from codice_tesi.discharge.template import load_template
 

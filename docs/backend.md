@@ -1,101 +1,86 @@
-# Backend clinico
+# Backend documentale
 
-Per il flusso di generazione e i comandi vedere il [README](../README.md).
+Il backend serve il flusso **eCREAM → PostgreSQL → pacchetto di compilazione**.
+L'applicazione riceve tutte le note del contesto insieme al template Campus,
+poi genera la lettera senza accedere al database.
 
-L'importazione delle note è deterministica:
-`import-ecream <notes.jsonl>` alimenta `composition_contexts` e `composition_sources`.
-`GET /api/v1/compilazione/avvio-test?seed=<intero>` seleziona il contesto del test
-ed espone tutte le sezioni; `GET /api/v1/compilazione/contesti/{id}/pacchetto`
-usa un contesto fissato. I pacchetti schema 3.0 contengono `context`,
-un unico elenco `sources` e il template
-`campus-discharge` 1.0.0, esposto anche da `GET /api/v1/compilazione/template`.
-I metadati importati in `letter_templates` restano storici e il relativo endpoint
-`/api/v1/modelli/{id}` è deprecato per la nuova compilazione. L'aggregatore riceve il pacchetto senza accedere al DB.
-Le API sotto restano disponibili per il contratto precedente; eCREAM non le
-popola con anagrafiche o ricoveri inventati.
+## Struttura
 
-Il backend conserva API di lettura, repository PostgreSQL, adattatore FHIR R4B
-e strumenti di importazione, ma **non carica dati all'avvio**.
+| File in `src/codice_tesi/backend/` | Responsabilità |
+| --- | --- |
+| `app.py` | Endpoint, errori HTTP, logging e controlli di salute. |
+| `database.py` | `BackendSettings`, pool PostgreSQL e inizializzazione dello schema. |
+| `repository.py` | Importazione atomica di contesti/fonti e lettura del pacchetto. |
+| `importer.py` | Lettura e raggruppamento eCREAM, coordinamento del salvataggio. |
+| `cli.py` | Comandi `init`, `import-ecream` e `serve`. |
+| `schema.sql` | Le sole tabelle `composition_contexts` e `composition_sources`. |
 
-## Avvio
+I modelli del pacchetto e il template canonico sono condivisi con l'applicazione
+nel modulo `discharge`; non esistono copie specifiche per il backend.
+
+## Avvio e importazione
 
 ```bash
 docker compose up --build -d backend
+docker compose run --rm \
+  -v "$PWD/../datasets_pubblici/ecream_gamma_span:/dataset:ro" \
+  backend-admin import-ecream /dataset/notes.jsonl
 ```
 
-Compose avvia PostgreSQL, esegue `tesi-backend init` per creare le sole tabelle
-e avvia il servizio con il ruolo `clinical_reader`. Nessun dataset viene montato
-nei container o importato automaticamente. Il volume `clinical-db` conserva lo
-schema e gli eventuali dati caricati esplicitamente.
+Compose avvia PostgreSQL, esegue `backend-admin init` e avvia il backend con il
+ruolo `clinical_reader`, di sola lettura. Lo stesso servizio amministrativo
+viene riutilizzato per l'importazione esplicita. Il volume `clinical-db`
+conserva lo schema e le note; nessun dataset viene caricato all'avvio.
 
-- Swagger: <http://localhost:8001/docs>
-- Liveness: `GET /health/live`
-- Readiness del database inizializzato: `GET /health/ready`
-- Elenchi iniziali: `GET /api/v1/reparti` e `GET /api/v1/ricoveri` restituiscono `[]`.
-
-Nei metadati di un database vuoto `dataset_caricato=false`, revisione `0`,
-scenario, esecuzione e versione del dataset sono `null`. Non viene creato uno
-scenario fittizio. La readiness non attesta la presenza di pazienti o documenti.
-
-## Comandi e importazione esplicita
+L'avvio locale usa la stessa CLI:
 
 ```bash
 uv run --locked --extra backend --no-editable tesi-backend init
+uv run --locked --extra backend --no-editable tesi-backend import-ecream /percorso/notes.jsonl
 uv run --locked --extra backend --no-editable tesi-backend serve
-uv run --locked --extra backend --no-editable tesi-backend --dataset-dir /percorso/dataset validate-dataset
-uv run --locked --extra backend --no-editable tesi-backend --dataset-dir /percorso/dataset import-dataset
 ```
 
-`--dataset-dir` o `CLINICAL_DATASET_DIR` è richiesto solo per validazione e
-importazione. Non esiste una directory predefinita. `init` crea le tabelle senza
-importare dati anche quando la variabile è presente. `import-dataset` richiede
-uno schema già inizializzato; l'importazione è atomica e non sostituisce un
-dataset differente già presente. Il vecchio comando `seed` è stato rimosso.
+Le impostazioni mantengono il prefisso `CLINICAL_`: `DATABASE_URL`,
+`DATABASE_SCHEMA`, `HOST`, `PORT`, `POOL_MIN_SIZE`, `POOL_MAX_SIZE`,
+`POOL_TIMEOUT` e `LOG_LEVEL`. L'URL locale predefinito punta alla porta 5433,
+mentre l'API ascolta su `127.0.0.1:8001`.
 
-Con Compose si può montare esplicitamente una directory esterna nel servizio
-amministrativo su richiesta:
+## API
 
-```bash
-docker compose run --rm -v /percorso/dataset:/dataset:ro backend-control --dataset-dir /dataset validate-dataset
-docker compose run --rm -v /percorso/dataset:/dataset:ro backend-control --dataset-dir /dataset import-dataset
-```
+Swagger è disponibile su <http://localhost:8001/docs>.
 
-Il loader supporta il contratto proprietario JSON/PDF descritto nella
-[guida dei dati](dataset.md), non FHIR/CDA. Non è il futuro importatore HL7.
-
-## API conservate
-
-| Superficie | Comportamento |
+| Endpoint GET | Comportamento |
 | --- | --- |
-| `/api/v1/reparti`, `/ricoveri` | Elenchi paginati e selezione del contesto. |
-| `/ricoveri/{id}` | Ricovero e paziente associato. |
-| `/ricoveri/{id}/fonti`, `/registrazioni`, `/documenti` | Filtri per episodio/paziente, canale, tipo, testo e date. |
-| `/ricoveri/{id}/fonti/{fonte_id}` | Testo, sezioni, versione e provenienza. |
-| `/ricoveri/{id}/documenti/{documento_id}/contenuto` | PDF conservato nel database, con ETag e versione esplicita. |
-| `/ricoveri/{id}/risultati` | Misure numeriche collegate alla versione della fonte. |
-| `/ricoveri/{id}/moduli`, `/modelli/{id}` | Copertura e modelli soltanto se importati. |
-| `/ricoveri/{id}/aggiornamenti` | Variazioni fra revisioni di una stessa esecuzione importata. |
-| `/ricoveri/{id}/fhir/metadata` | Capacità del sottoinsieme FHIR R4B, nel contesto di un ricovero esistente. |
-| `/ricoveri/{id}/fhir/{tipo}` e `/{tipo}/{id}` | Search/read di Patient, Encounter, Observation, DiagnosticReport e DocumentReference. |
+| `/api/v1/compilazione/template` | Template Campus canonico, anche senza note importate. |
+| `/api/v1/compilazione/avvio-test?seed=42` | Seleziona un contesto in modo riproducibile. |
+| `/api/v1/compilazione/contesti/{id}/pacchetto` | Restituisce il contesto richiesto e tutte le sue fonti. |
+| `/health/live` | Processo attivo. |
+| `/health/ready` | Database raggiungibile e due tabelle documentali leggibili. |
 
-Il repository è utilizzabile senza HTTP tramite `open_repository()`, con una
-transazione di sola lettura. Gli strumenti clinici non vengono esposti all'aggregatore della dimissione. FHIR è una rappresentazione aggiuntiva dei dati SQL, non un convertitore
-universale o un server certificato secondo profili italiani.
+La readiness accetta un database inizializzato ma vuoto. In assenza di note,
+`avvio-test` restituisce `409`; un contesto inesistente restituisce `404`.
+Un seed negativo o non intero restituisce `422`.
+Gli errori usano `application/problem+json` e includono il `request_id`, esposto
+anche nell'header `X-Request-ID`. I log non includono i testi delle fonti.
 
-## Scenari esterni e test
+Il pacchetto resta nello schema `3.0`, con `context`, un unico elenco `sources`
+ordinato e `template`. Contesto e fonti vengono letti nella stessa transazione
+`REPEATABLE READ READ ONLY`; non c'è selezione delle note per campo della lettera.
+Il template resta `campus-discharge` versione `1.0.0`.
 
-Rimane il meccanismo generico di scenari e orologio per futuri esperimenti:
-non sono distribuiti casi predefiniti. Lo scenario iniziale è dichiarato dal
-campo `scenario_iniziale` del manifesto esterno; nessun identificativo è imposto.
+## Compatibilità dei dati
 
-```bash
-docker compose run --rm backend-control scenario list
-docker compose run --rm backend-control scenario status
-```
+I database esistenti conservano i contesti eCREAM già importati: le due tabelle
+documentali e i relativi payload restano invariati. `init` è idempotente e crea
+soltanto le tabelle mancanti. Le vecchie tabelle del simulatore eventualmente
+presenti restano inutilizzate e non vengono cancellate automaticamente.
 
-Senza dataset la lista è vuota e la selezione/avanzamento viene rifiutata.
-Dopo un'importazione si possono usare `scenario select <id>` e
-`scenario advance --at <data-con-fuso>`.
+Sono stati rimossi il simulatore clinico, gli scenari, le API di ricoveri,
+fonti cliniche e FHIR, il loader JSON/PDF e i relativi comandi. In Compose
+`backend-admin` sostituisce i precedenti servizi `backend-init` e `backend-control`.
+Il nome del volume PostgreSQL resta invariato.
+
+## Verifiche
 
 ```bash
 CLINICAL_TEST_POSTGRES_URL=postgresql://utente:password@localhost:5433/database \
@@ -104,16 +89,6 @@ uv run --locked --extra backend --no-editable ruff check .
 uv run --locked --extra backend --no-editable ruff format --check .
 ```
 
-I test creano uno schema PostgreSQL isolato per caso e fixture temporanee.
+I test creano uno schema PostgreSQL isolato per caso e note temporanee.
 La CI fornisce PostgreSQL e non dipende da file clinici nella repository.
-
-## Contesto della lettera per note_id
-
-La compilazione legge tutte le fonti di `composition_sources` con il medesimo
-`context_id` (per eCREAM: `ecream-note-<note_id>`), ordinate e nello stesso snapshot.
-Il pacchetto contiene l'intero gruppo una sola volta insieme al template Campus.
-Non viene applicata selezione per campo o tipo nota.
-L'importatore raggruppa righe per `note_id`, conserva ogni testo distinto e deduplica
-le ripetizioni identiche dovute alle annotazioni. I contesti vengono salvati una
-sola volta anche quando hanno più fonti. Lo schema HTTP è `3.0`; le tabelle
-restano invariate. Aggiornare backend e applicazione insieme.
+Per il formato di importazione vedere il [contratto eCREAM](dataset.md).

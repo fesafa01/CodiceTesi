@@ -1,54 +1,51 @@
-# Contratto dei dati e importazione
+# Dati eCREAM
 
-Per importare le note eCREAM e generare la bozza Campus vedere il
-[README](../README.md). Questo documento descrive il loader JSON/PDF opzionale.
-Il servizio si inizializza senza dati: non ricrea pazienti, documenti, template
-o scenari.
+Il backend importa esplicitamente `notes.jsonl` eCREAM. Ogni riga non vuota
+è un oggetto JSON con `note_id` intero e `text` non vuoto. `split` identifica
+la provenienza; se assente viene registrato come `unknown`.
 
-## Loader locale conservato
+Il testo deve contenere un solo marcatore riconosciuto:
 
-`dataset.py` valida un formato proprietario JSON/PDF; `importer.py` lo importa
-in una transazione PostgreSQL. Sono strumenti riutilizzabili, non un dataset
-e non adattatori HL7. L'importazione richiede `--dataset-dir` o
-`CLINICAL_DATASET_DIR` e uno schema già creato con `init`.
+| Marcatore | Tipo della fonte |
+| --- | --- |
+| `---TRIAGE---` | `triage` |
+| `---ANAMNESIS---` | `anamnesi` |
+| `---MEDICAL_VISIT---` | `visita` |
+| `---CLINICAL_DIARY---` | `diario` |
+| `---SPECIALIST_CONSULTANCY---` | `consulenza` |
+| `---NURSING_CARE_NOTES---` | `assistenza` |
+| `---DISCHARGE---` | `dimissione` |
 
-Il manifesto locale richiede `schema_version: "2.0"`, `versione`,
-`sintetico: true`, `snapshot` con fuso orario, `scenario_iniziale`, `descrizione`
-e le voci `files`: reparti, pazienti, ricoveri, prestazioni, modello_lettera,
-fonti, scenari e copertura. Lo scenario iniziale deve essere fra quelli dichiarati.
-Non vengono assunti identificativi, date o numeri di pazienti predefiniti.
+## Raggruppamento e provenienza
 
-Le registrazioni sono JSON con identità, contesto, autore, date, sezioni ed
-misure eventuali. I documenti hanno metadati JSON, un originale PDF e un'eventuale
-estrazione testuale JSON separata, con hash e versione della fonte. Le quantità
-sono strutturate nelle sorgenti: il backend non le estrae dal PDF.
+`importer.py` raggruppa le righe per `note_id`. Ogni gruppo diventa un contesto
+`ecream-note-<note_id>`; ogni testo distinto diventa una fonte. Le righe con lo
+stesso testo nello stesso gruppo vengono deduplicate, unendo le provenienze.
+ID diversi restano separati anche quando i testi coincidono.
 
-Il loader controlla percorsi relativi, estensioni, JSON UTF-8 senza chiavi
-ripetute o NaN/Infinity, hash e dimensioni, leggibilità dei PDF, pagine delle
-estrazioni, contesto paziente/episodio e cronologia delle versioni.
-Il contratto locale accetta soltanto dati dichiarati sintetici. L'importazione
-FHIR/CDA e la gestione di dataset reali richiedono adattatori e un contratto di
-provenienza dedicati.
+Un contesto con un solo testo ha ambito `nota_isolata`; con più testi ha ambito
+`gruppo_note`. Il raggruppamento non certifica l'identità di un paziente o di un
+episodio: `patient_id` ed `episode_id` restano null. Le annotazioni CRF non
+vengono usate come fatti clinici o risposte attese.
 
-## Database e rappresentazioni
+Ogni fonte conserva testo originale, tipo, provenienza, versione e SHA-256.
+La versione del dataset è il digest dell'intero file JSONL: anche una modifica
+alla sola formattazione cambia la versione. Le fonti hanno identificativi
+stabili derivati dal `note_id` e, nei gruppi con più testi, dal digest del testo.
 
-Originali, sezioni, misure e metadati sono conservati nel database.
-Le API non leggono file del dataset durante le richieste. Gli elenchi su una
-base vuota sono vuoti e dichiarano `dataset_caricato=false`.
+## Persistenza
 
-L'adattatore esistente espone FHIR **R4B 4.3.0** in JSON, con negoziazione
-`Accept` e `_format`. Patient, Encounter, Observation, DiagnosticReport e
-DocumentReference sono proiezioni SQL. I Bundle `searchset` sono risultati di
-ricerca, non una cartella trasferibile come documento FHIR completo.
+`composition_contexts` conserva ID e payload del contesto;
+`composition_sources` conserva ID, riferimento al contesto e payload della fonte.
+Chiavi esterne e vincoli verificano il legame fra gli identificativi SQL e JSON.
 
-Non sono implementati importazione HL7 v2/CDA/FHIR, PDF/A, firma digitale,
-OCR o validazione completa rispetto alle IG italiane. La libreria
-`fhir.resources` valida modelli Python, non converte file arbitrari.
-Per i comandi vedere il [manuale](backend.md).
+Tutti i contesti e le fonti vengono salvati in una sola transazione. Un lock
+serializza le importazioni concorrenti. Ripetere l'importazione della stessa
+versione non duplica i dati; una versione diversa di un dataset già presente
+viene rifiutata e richiede un database separato.
 
-## Fixture dei test
+Il pacchetto HTTP include tutte le fonti del contesto ordinate per ID insieme
+al template Campus incluso nell'applicazione. Il tipo di nota non filtra le
+fonti e non seleziona sezioni della lettera.
 
-I test costruiscono piccoli file in `tmp_path` e schemi temporanei nel database
-di test. Usano identificativi e contenuti tecnici per verificare isolamento,
-versioni, integrità e contratti HTTP, senza distribuire cartelle cliniche o
-alimentare il servizio di sviluppo. Non costituiscono il nuovo benchmark clinico.
+Per avvio e comandi vedere il [manuale del backend](backend.md).

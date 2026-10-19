@@ -1,1 +1,1 @@
-"""Servizio clinico sintetico indipendente dall'inferenza del modello."""
+"""Backend documentale eCREAM indipendente dall’inferenza del modello."""
