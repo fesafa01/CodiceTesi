@@ -348,8 +348,15 @@ async def updates(
     )
 
 
-@router.get("/modelli/{modello_id}", response_model=Response[TemplateRead], tags=["Modelli"])
+@router.get(
+    "/modelli/{modello_id}",
+    response_model=Response[TemplateRead],
+    tags=["Modelli storici"],
+    deprecated=True,
+    description=("Metadati storici importati. Contratto attivo: /api/v1/compilazione/template."),
+)
 async def template(modello_id: str, request: Request, repo: Repo):
+    """Legge una descrizione storica del dataset, mai usata come template della stesura."""
     row = await repo.template(modello_id)
     return response(
         request,
@@ -478,8 +485,10 @@ def create_app(settings: BackendSettings | None = None) -> FastAPI:
             return JSONResponse(status_code=503, content={"stato": "non_pronto"})
         return {"stato": "pronto"}
 
+    from codice_tesi.backend.composition_routes import router as composition_router
     from codice_tesi.backend.fhir_routes import create_router
 
     app.include_router(router)
+    app.include_router(composition_router)
     app.include_router(create_router(repository))
     return app

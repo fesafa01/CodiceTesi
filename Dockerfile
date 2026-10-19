@@ -17,7 +17,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYDANTIC_AI_NO_BANNER=1
-RUN useradd --uid 10001 --create-home app
+RUN useradd --uid 10001 --create-home app \
+    && mkdir -p /app/var/runs && chown -R app:app /app/var
 USER app
 
 FROM runtime-base AS backend
@@ -29,4 +30,4 @@ FROM runtime-base AS runtime
 COPY --from=builder /app/.venv /app/.venv
 COPY main.py ./
 ENTRYPOINT ["python", "/app/main.py"]
-CMD ["--help"]
+CMD ["dimissione"]

@@ -1,33 +1,29 @@
 """Parametri del modello in Python; credenziali e connessione nel .env."""
 
-from typing import Literal
-
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
 from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ModelConfig(BaseModel):
-    """Modificare i default qui, oppure passare ModelConfig(...) all'agente."""
+    """Configurazione della redazione in streaming; max_tokens è il limite per l’intera lettera."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True, validate_default=True)
 
     model: str = Field(default="deepseek-v4-flash", min_length=1)
-    max_tokens: int = Field(default=2048, gt=0)
-    temperature: float | None = Field(default=None, ge=0)
+    max_tokens: int = Field(default=8192, gt=0)
+    temperature: float | None = Field(default=0, ge=0)
     top_p: float | None = Field(default=None, ge=0, le=1)
     top_k: int | None = Field(default=None, gt=0)
     min_p: float | None = Field(default=None, ge=0, le=1)
     stop: list[str] | None = None
     seed: int | None = None
-    reasoning_effort: str | None = Field(default=None, min_length=1)
-    tool_choice: Literal["auto", "none", "required"] | None = None
-    stream: bool = True
+    reasoning_effort: str | None = Field(default="low", min_length=1)
 
     def request_settings(self) -> OpenAIChatModelSettings:
         """Traduce i nomi del server nei campi PydanticAI, omettendo quelli non impostati."""
         values = self.model_dump(
-            include={"max_tokens", "temperature", "top_p", "seed", "tool_choice"},
+            include={"max_tokens", "temperature", "top_p", "seed"},
             exclude_none=True,
         )
         if self.stop is not None:
@@ -49,4 +45,4 @@ class Settings(BaseSettings):
 
     base_url: AnyHttpUrl = AnyHttpUrl("http://spark-413e.tail9c981a.ts.net:8000/v1")
     api_key: SecretStr = Field(default=SecretStr("not-required"), min_length=1)
-    timeout: float = Field(default=120, gt=0)
+    timeout: float = Field(default=300, gt=0)

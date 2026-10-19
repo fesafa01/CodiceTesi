@@ -35,6 +35,15 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.uv]
+# L'installazione non-editable deve seguire anche sorgenti e template, non solo i metadati.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "README.md" },
+    { file = "src/**/*.py" },
+    { file = "src/**/*.json" },
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

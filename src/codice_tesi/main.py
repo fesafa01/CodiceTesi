@@ -3,45 +3,92 @@
 import argparse
 import asyncio
 import os
+from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Traduce gli argomenti CLI in configurazione e rende leggibili gli errori.
+
+    La compilazione non accetta un prompt libero: delega il caso d'uso
+    ad application.run_application. L'unica utility è l'elenco dei modelli.
+    """
     os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
-    parser = argparse.ArgumentParser(description="Prototipo della tesi: modello remoto.")
+    parser = argparse.ArgumentParser(description="Prototipo di compilazione della dimissione.")
     commands = parser.add_subparsers(dest="command")
+    discharge = commands.add_parser(
+        "dimissione", help="Redige la bozza Campus con una sola richiesta in streaming."
+    )
+    selection = discharge.add_mutually_exclusive_group()
+    selection.add_argument("--seed", type=int, help="Seed della selezione casuale del contesto.")
+    selection.add_argument(
+        "--contesto", help="Fissa il contesto già aperto, senza selezione casuale."
+    )
+    discharge.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Salva l’unica richiesta completa senza chiamare il modello.",
+    )
+    discharge.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("var/runs"),
+        help="Directory dei risultati; ogni esecuzione crea una sottocartella distinta.",
+    )
+    discharge.add_argument(
+        "--context-window",
+        type=int,
+        default=32768,
+        help="Budget della richiesta in token stimati: note, campi Campus, output e margine.",
+    )
+    discharge.add_argument(
+        "--backend-url",
+        default=os.getenv("APP_BACKEND_URL", "http://127.0.0.1:8001"),
+        help="URL del backend clinico; default APP_BACKEND_URL o http://127.0.0.1:8001.",
+    )
     commands.add_parser("modelli", help="Elenca i modelli del server LLM.")
-    agent = commands.add_parser("agente", help="Invia un prompt al modello remoto.")
-    agent.add_argument("prompt", help="Richiesta da inviare al modello.")
-    agent.add_argument("--stream", action=argparse.BooleanOptionalAction, default=None)
     args = parser.parse_args(argv)
     if args.command is None:
-        parser.print_help()
-        return
+        args = parser.parse_args(["dimissione"])
+    if args.command == "dimissione" and args.seed is not None and args.seed < 0:
+        parser.error("il seed deve essere non negativo")
 
     from openai import APIConnectionError, APIStatusError
     from pydantic import ValidationError
     from pydantic_ai.exceptions import AgentRunError, UserError
 
-    from codice_tesi.cli import run
-    from codice_tesi.config import ModelConfig, Settings
+    from codice_tesi import api
+    from codice_tesi.config import Settings
 
-    prompt = getattr(args, "prompt", None)
-    if prompt is not None and not prompt.strip():
-        parser.error("il prompt non può essere vuoto")
     try:
-        settings = Settings()
-        config = ModelConfig()
-        if getattr(args, "stream", None) is not None:
-            config.stream = args.stream
-        asyncio.run(
-            run(prompt, list_models=args.command == "modelli", settings=settings, config=config)
-        )
+        if args.command == "dimissione":
+            from codice_tesi.application import run_application
+            from codice_tesi.discharge.config import ContextConfig
+
+            asyncio.run(
+                run_application(
+                    backend_url=args.backend_url,
+                    output_dir=args.output_dir,
+                    seed=args.seed,
+                    context_id=args.contesto,
+                    dry_run=args.dry_run,
+                    context_config=ContextConfig(window_tokens=args.context_window),
+                )
+            )
+            return
+        for model in asyncio.run(api.list_models(Settings())):
+            print(model)
     except ValidationError as exc:
-        fields = ", ".join(".".join(map(str, error["loc"])) for error in exc.errors())
+        fields = ", ".join(
+            ".".join(map(str, error["loc"])) or "contratto" for error in exc.errors()
+        )
+        if args.command == "dimissione":
+            parser.exit(2, f"Dati o configurazione non validi ({fields}).\n")
         parser.exit(2, f"Configurazione non valida: controlla {fields} in ModelConfig o .env.\n")
     except APIConnectionError:
         parser.exit(1, "Connessione fallita: verifica Tailscale, LLM_BASE_URL e LLM_TIMEOUT.\n")
     except (APIStatusError, AgentRunError, UserError) as exc:
         parser.exit(1, f"Errore del modello: {exc}\n")
+    except (ValueError, OSError) as exc:
+        parser.exit(1, f"Compilazione non completata: {exc}\n")
     except KeyboardInterrupt:
         parser.exit(130)

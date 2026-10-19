@@ -1,5 +1,16 @@
 # Backend clinico
 
+Dal 18 ottobre è disponibile la [compilazione deterministica](compilazione.md):
+`import-ecream <notes.jsonl>` alimenta `composition_contexts` e `composition_sources`.
+`GET /api/v1/compilazione/avvio-test?seed=<intero>` seleziona il contesto del test
+ed espone tutte le sezioni; `GET /api/v1/compilazione/contesti/{id}/pacchetto`
+usa un contesto fissato. I pacchetti schema 2.0 incorporano il template unico
+`campus-discharge` 1.0.0, esposto anche da `GET /api/v1/compilazione/template`.
+I metadati importati in `letter_templates` restano storici e il relativo endpoint
+`/api/v1/modelli/{id}` è deprecato per la nuova compilazione. L'aggregatore riceve il pacchetto senza accedere al DB.
+Le API sotto restano disponibili per il contratto precedente; eCREAM non le
+popola con anagrafiche o ricoveri inventati.
+
 Stato del 17 ottobre 2026: il vecchio dataset generato è stato rimosso.
 Il backend conserva API di lettura, repository PostgreSQL, adattatore FHIR R4B
 e strumenti di importazione, ma **non carica dati all'avvio**.
@@ -66,8 +77,7 @@ Il loader supporta il contratto proprietario JSON/PDF descritto nella
 | `/ricoveri/{id}/fhir/{tipo}` e `/{tipo}/{id}` | Search/read di Patient, Encounter, Observation, DiagnosticReport e DocumentReference. |
 
 Il repository è utilizzabile senza HTTP tramite `open_repository()`, con una
-transazione di sola lettura. Gli strumenti clinici non sono ancora collegati
-all'agente. FHIR è una rappresentazione aggiuntiva dei dati SQL, non un convertitore
+transazione di sola lettura. Gli strumenti clinici non vengono esposti all'aggregatore della dimissione. FHIR è una rappresentazione aggiuntiva dei dati SQL, non un convertitore
 universale o un server certificato secondo profili italiani.
 
 ## Scenari esterni e test
@@ -94,3 +104,12 @@ uv run --locked --extra backend --no-editable ruff format --check .
 
 I test creano uno schema PostgreSQL isolato per caso e fixture temporanee.
 La CI fornisce PostgreSQL e non dipende da file clinici nella repository.
+
+## Contesto della lettera per note_id
+
+La compilazione legge tutte le fonti di `composition_sources` con il medesimo
+`context_id` (per eCREAM: `ecream-note-<note_id>`), ordinate e nello stesso snapshot.
+Ogni campo riceve l'intero gruppo; non viene applicata selezione per tipo nota.
+L'importatore raggruppa righe per `note_id`, conserva ogni testo distinto e deduplica
+le ripetizioni identiche dovute alle annotazioni. I contesti vengono salvati una
+sola volta anche quando hanno più fonti. La policy attiva è `campus-context-v2`.

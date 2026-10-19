@@ -1,0 +1,623 @@
+{
+  "schema_version": "1.0",
+  "id": "campus-discharge",
+  "version": "1.0.0",
+  "title": "Relazione di dimissione — modello Campus del prototipo",
+  "source_reference": "policlinico/lettera_dimissione/componenti/Modello_Attuale.md#campi-della-relazione-conservati-come-riferimento",
+  "interpretation_notes": [
+    "Ricostruzione dai materiali della call Campus del 1 ottobre 2026: non è un modello certificato del fornitore.",
+    "required indica un asterisco riportato negli appunti; le ambiguità sono conservate come unconfirmed.",
+    "Assenza di asterisco non equivale a facoltatività accertata.",
+    "Sottocampi, tipi e required_for_completeness sono una scomposizione tecnica proposta per il prototipo, non obblighi singolarmente attestati dalla call.",
+    "Un campo obbligatorio privo di dati resta mancante nella bozza e nel rapporto di completezza; non autorizza a inventare informazioni.",
+    "Nessun recapito, anagrafica, codice o valore clinico predefinito è incorporato nel template."
+  ],
+  "sections": [
+    {
+      "id": "identificazione",
+      "title": "Identificativi del paziente e struttura",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": false,
+      "instruction": "Riporta soltanto identificativi verificati e dati anagrafici o organizzativi espliciti. Non usare note_id come identità clinica.",
+      "fields": [
+        {
+          "id": "paziente_id",
+          "label": "Identificativo paziente",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Copia esclusivamente patient_id dal contesto verificato.",
+          "context_key": "patient_id"
+        },
+        {
+          "id": "episodio_id",
+          "label": "Identificativo episodio",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Copia esclusivamente episode_id dal contesto verificato.",
+          "context_key": "episode_id"
+        },
+        {
+          "id": "nome",
+          "label": "Nome",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta il nome soltanto se esplicito nelle fonti anagrafiche."
+        },
+        {
+          "id": "cognome",
+          "label": "Cognome",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta il cognome soltanto se esplicito nelle fonti anagrafiche."
+        },
+        {
+          "id": "data_nascita",
+          "label": "Data di nascita",
+          "type": "date",
+          "required_for_completeness": false,
+          "instruction": "Usa una data completa esplicita; non ricostruirla da età o note_id."
+        },
+        {
+          "id": "struttura",
+          "label": "Struttura",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta solo la struttura esplicitamente indicata."
+        },
+        {
+          "id": "unita_clinica",
+          "label": "Unità clinica",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta il reparto esplicito senza inferirlo dal contenuto clinico."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "data_dimissione",
+      "title": "Data di dimissione",
+      "requirement": {
+        "status": "unconfirmed",
+        "basis": "La data è citata nella call; obbligatorietà da confermare."
+      },
+      "repeatable": false,
+      "instruction": "Distingui la data effettiva dalla data prevista. Non usare la data corrente o quella di esecuzione.",
+      "fields": [
+        {
+          "id": "data",
+          "label": "Data effettiva di dimissione",
+          "type": "date",
+          "required_for_completeness": true,
+          "instruction": "Riporta una data completa esplicitamente riferita alla dimissione effettiva."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "diagnosi_dimissione",
+      "title": "Diagnosi alla dimissione testuale",
+      "requirement": {
+        "status": "unconfirmed",
+        "basis": "Nessun asterisco riportato: obbligatorietà non accertata, non equivale a facoltatività confermata."
+      },
+      "repeatable": true,
+      "instruction": "Riporta esclusivamente diagnosi documentate alla dimissione, conservando sospetti e qualificazioni. Non diagnosticare dai sintomi.",
+      "fields": [
+        {
+          "id": "diagnosi",
+          "label": "Diagnosi",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Aggrega solo la diagnosi esplicitamente riportata alla dimissione."
+        },
+        {
+          "id": "qualificazione",
+          "label": "Qualificazione documentata",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta, se esplicita, la qualificazione come sospetta o confermata."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "diagnosi_codificate",
+      "title": "Diagnosi alla dimissione codificate",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": true,
+      "instruction": "Trascrivi codici presenti nelle fonti della dimissione. Non codificare autonomamente diagnosi testuali e non confermare la diagnosi iniziale.",
+      "fields": [
+        {
+          "id": "codice",
+          "label": "Codice diagnostico",
+          "type": "code",
+          "required_for_completeness": true,
+          "instruction": "Copia il codice letterale presente nella citazione."
+        },
+        {
+          "id": "sistema_codifica",
+          "label": "Sistema di codifica",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta il sistema solo se dichiarato; non dedurlo dalla forma del codice."
+        },
+        {
+          "id": "descrizione",
+          "label": "Descrizione",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta la descrizione esplicita associata a quel codice."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "procedure_codificate",
+      "title": "Procedure alla dimissione codificate",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": true,
+      "instruction": "Trascrivi soltanto codici procedurali espliciti associati alla dimissione; non generarli da descrizioni di interventi.",
+      "fields": [
+        {
+          "id": "codice",
+          "label": "Codice procedura",
+          "type": "code",
+          "required_for_completeness": true,
+          "instruction": "Copia il codice letterale presente nella citazione."
+        },
+        {
+          "id": "sistema_codifica",
+          "label": "Sistema di codifica",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Non attribuire un sistema di codifica non documentato."
+        },
+        {
+          "id": "descrizione",
+          "label": "Descrizione",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta la descrizione associata al codice, se disponibile."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "motivo_ricovero",
+      "title": "Motivo del ricovero",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": false,
+      "instruction": "Sintetizza la ragione documentata dell’accesso e l’eventuale indicazione al ricovero. Distingui sintomo, sospetto e diagnosi già documentata.",
+      "fields": [
+        {
+          "id": "descrizione",
+          "label": "Motivo documentato",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta il motivo dell’accesso mantenendo negazioni e incertezza."
+        },
+        {
+          "id": "sintomi",
+          "label": "Sintomi riferiti",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta solo i sintomi pertinenti esplicitamente descritti."
+        },
+        {
+          "id": "insorgenza",
+          "label": "Insorgenza riferita",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Conserva le espressioni temporali originali senza calcolare date."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "problemi_non_attivi",
+      "title": "Problemi non attivi",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": true,
+      "instruction": "Riporta solo problemi esplicitamente pregressi, risolti o non attivi. L’assenza di menzione non dimostra risoluzione.",
+      "fields": [
+        {
+          "id": "problema",
+          "label": "Problema",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Identifica il problema esplicitamente descritto come pregresso o non attivo."
+        },
+        {
+          "id": "stato",
+          "label": "Stato documentato",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Usa la qualificazione presente nella fonte, senza trasformare un problema attivo in pregresso."
+        },
+        {
+          "id": "periodo",
+          "label": "Periodo riferito",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta l’indicazione temporale originale, se presente."
+        }
+      ],
+      "allows_documented_absence": true
+    },
+    {
+      "id": "procedure_diagnostiche_terapeutiche",
+      "title": "Procedure diagnostiche e terapeutiche",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": true,
+      "instruction": "Distingui procedure eseguite, richieste e programmate. Mantieni ogni procedura e relativo esito nello stesso record.",
+      "fields": [
+        {
+          "id": "procedura",
+          "label": "Procedura",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta il nome della procedura documentata."
+        },
+        {
+          "id": "stato",
+          "label": "Stato della procedura",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Usa uno stato solo se sostenuto dalla fonte.",
+          "choices": [
+            "eseguita",
+            "richiesta",
+            "programmata",
+            "sospesa",
+            "non_eseguita"
+          ]
+        },
+        {
+          "id": "data",
+          "label": "Data",
+          "type": "date",
+          "required_for_completeness": false,
+          "instruction": "Riporta una data completa solo se esplicita."
+        },
+        {
+          "id": "esito",
+          "label": "Esito documentato",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Non attribuire risultati a procedure soltanto richieste."
+        }
+      ],
+      "allows_documented_absence": true
+    },
+    {
+      "id": "esami_laboratorio",
+      "title": "Esami di laboratorio",
+      "requirement": {
+        "status": "unconfirmed",
+        "basis": "Nessun asterisco riportato: obbligatorietà non accertata, non equivale a facoltatività confermata."
+      },
+      "repeatable": true,
+      "instruction": "Riporta risultati documentati con nome, valore ed eventuale unità. Non aggiungere intervalli o interpretazioni cliniche proprie.",
+      "fields": [
+        {
+          "id": "esame",
+          "label": "Esame",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta la denominazione esplicita dell’esame."
+        },
+        {
+          "id": "risultato",
+          "label": "Risultato",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Conserva valore, segno, negazione e qualificazioni documentate."
+        },
+        {
+          "id": "unita",
+          "label": "Unità di misura",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Non dedurre unità assenti."
+        },
+        {
+          "id": "data",
+          "label": "Data del risultato",
+          "type": "date",
+          "required_for_completeness": false,
+          "instruction": "Usa solo una data completa documentata."
+        }
+      ],
+      "allows_documented_absence": true
+    },
+    {
+      "id": "decorso",
+      "title": "Epicrisi e decorso ospedaliero",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": true,
+      "instruction": "Aggrega gli eventi e l’evoluzione documentata; ordina cronologicamente solo se le fonti consentono un ordine verificabile. Non inventare guarigione o conclusione del ricovero.",
+      "fields": [
+        {
+          "id": "evento",
+          "label": "Evento o sintesi",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Descrivi un evento o una sintesi sostenuta dalle evidenze."
+        },
+        {
+          "id": "riferimento_temporale",
+          "label": "Riferimento temporale",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Mantieni il riferimento documentato, anche relativo; non usare l’ordine degli ID come cronologia."
+        },
+        {
+          "id": "evoluzione",
+          "label": "Evoluzione documentata",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta miglioramento o peggioramento solo quando espliciti."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "condizioni_dimissione",
+      "title": "Condizione clinica alla dimissione",
+      "requirement": {
+        "status": "unconfirmed",
+        "basis": "Asterisco negli appunti, ma trascrizione ambigua: obbligatorietà effettiva da confermare."
+      },
+      "repeatable": false,
+      "instruction": "Riporta soltanto condizioni esplicitamente riferite al momento della dimissione, senza usare una visita intermedia come stato finale.",
+      "fields": [
+        {
+          "id": "descrizione",
+          "label": "Condizioni documentate",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Descrivi lo stato clinico alla dimissione soltanto se esplicito."
+        },
+        {
+          "id": "autonomia",
+          "label": "Autonomia riferita",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta solo autonomia o assistenza esplicitamente documentate."
+        },
+        {
+          "id": "destinazione",
+          "label": "Destinazione",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta la destinazione dichiarata senza inferirla dallo stato clinico."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "programma_followup",
+      "title": "Programma terapeutico, istruzioni e follow-up",
+      "requirement": {
+        "status": "unconfirmed",
+        "basis": "Nessun asterisco riportato: obbligatorietà non accertata, non equivale a facoltatività confermata."
+      },
+      "repeatable": true,
+      "instruction": "Aggrega solo indicazioni prescritte o istruzioni già documentate. Non proporre controlli, trattamenti o raccomandazioni.",
+      "fields": [
+        {
+          "id": "indicazione",
+          "label": "Indicazione documentata",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta la prescrizione, istruzione o controllo presente nella fonte."
+        },
+        {
+          "id": "tempistica",
+          "label": "Tempistica",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Conserva intervalli o scadenze espliciti senza calcolarli."
+        },
+        {
+          "id": "destinatario",
+          "label": "Servizio o destinatario",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta il destinatario indicato, se presente."
+        }
+      ],
+      "allows_documented_absence": true
+    },
+    {
+      "id": "terapia_dimissione",
+      "title": "Terapia in dimissione",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": true,
+      "instruction": "Riporta solo prescrizioni finali esplicite. La terapia domiciliare di ingresso e i farmaci somministrati durante la degenza non costituiscono automaticamente terapia in dimissione. Usa un record per prescrizione.",
+      "fields": [
+        {
+          "id": "farmaco",
+          "label": "Farmaco",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Trascrivi il farmaco senza sostituirlo con equivalenti o altri principi attivi."
+        },
+        {
+          "id": "dose",
+          "label": "Dose",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta dose e unità esplicite; se assenti dichiara il dato mancante."
+        },
+        {
+          "id": "via",
+          "label": "Via di somministrazione",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Non dedurre la via dalla formulazione o dal farmaco."
+        },
+        {
+          "id": "frequenza",
+          "label": "Frequenza",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Non completare frequenze mancanti con schemi abituali."
+        },
+        {
+          "id": "durata",
+          "label": "Durata",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta solo durata o prosecuzione continuativa esplicite, senza calcoli."
+        }
+      ],
+      "allows_documented_absence": true
+    },
+    {
+      "id": "contatti_urgenze",
+      "title": "Contatti per follow-up e istruzioni urgenti",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": true,
+      "instruction": "Usa soltanto recapiti e istruzioni forniti dal modello di reparto o documentati nelle fonti. Non inventare numeri, servizi o indicazioni urgenti.",
+      "fields": [
+        {
+          "id": "servizio",
+          "label": "Servizio",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta il servizio esplicitamente indicato."
+        },
+        {
+          "id": "recapito",
+          "label": "Recapito",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Trascrivi il recapito documentato senza completarlo."
+        },
+        {
+          "id": "istruzioni_urgenti",
+          "label": "Istruzioni urgenti",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Trascrivi solo le istruzioni già fornite, senza generarne di nuove."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "istologico_in_attesa",
+      "title": "In attesa di esame istologico",
+      "requirement": {
+        "status": "required",
+        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+      },
+      "repeatable": false,
+      "instruction": "Determina sì/no esclusivamente da una dichiarazione esplicita riferita alla dimissione. La mancanza di menzione non equivale a no.",
+      "fields": [
+        {
+          "id": "attesa",
+          "label": "Esame istologico in attesa",
+          "type": "boolean",
+          "required_for_completeness": true,
+          "instruction": "Restituisci true o false solo con una dichiarazione esplicita a supporto."
+        }
+      ],
+      "allows_documented_absence": false
+    },
+    {
+      "id": "informazioni_istologico",
+      "title": "Informazioni sull’istologico",
+      "requirement": {
+        "status": "conditional",
+        "basis": "Testo aggiuntivo previsto quando è documentata un’attesa; regola condizionale del prototipo, non un obbligo autonomo certificato."
+      },
+      "repeatable": false,
+      "instruction": "Compila i dettagli solo se è documentato che l’istologico è in attesa; segnala condizioni non accertabili e non inventare modalità di ritiro.",
+      "fields": [
+        {
+          "id": "esame",
+          "label": "Esame in attesa",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta l’esame esplicitamente indicato come ancora in attesa."
+        },
+        {
+          "id": "informazioni",
+          "label": "Informazioni documentate",
+          "type": "text",
+          "required_for_completeness": true,
+          "instruction": "Riporta le informazioni aggiuntive disponibili."
+        },
+        {
+          "id": "ritiro",
+          "label": "Modalità di ritiro o comunicazione",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Usa soltanto modalità già documentate."
+        }
+      ],
+      "applies_when": {
+        "section_id": "istologico_in_attesa",
+        "field_id": "attesa",
+        "equals": true
+      },
+      "allows_documented_absence": false
+    },
+    {
+      "id": "medici",
+      "title": "Specializzando e altro medico",
+      "requirement": {
+        "status": "optional",
+        "basis": "Non obbligatori secondo la call; tipo e collocazione dei controlli non verificati."
+      },
+      "repeatable": false,
+      "instruction": "Riporta solo i professionisti esplicitamente associati alla lettera; non attribuire la firma al nome presente in una qualsiasi nota.",
+      "fields": [
+        {
+          "id": "specializzando",
+          "label": "Specializzando",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta il nome solo se esplicitamente associato alla lettera."
+        },
+        {
+          "id": "altro_medico",
+          "label": "Altro medico",
+          "type": "text",
+          "required_for_completeness": false,
+          "instruction": "Riporta il nome solo se esplicitamente associato alla lettera."
+        }
+      ],
+      "allows_documented_absence": false
+    }
+  ]
+}

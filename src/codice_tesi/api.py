@@ -2,11 +2,10 @@
 
 GET /v1/models: elenco dei modelli con client.models.list().
 POST /v1/chat/completions: generazione tramite l'adattatore OpenAIChatModel.
-PydanticAI usa lo stesso client per inviare messaggi, parametri e schemi dei tool.
-Con stream=True, il POST restituisce eventi SSE letti progressivamente dal client.
+PydanticAI invia una sola richiesta in streaming con tutte le note e i campi Campus.
 """
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, Timeout
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -14,12 +13,12 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from codice_tesi.config import ModelConfig, Settings
 
 
-def create_client(settings: Settings) -> AsyncOpenAI:
-    """Configura endpoint, autenticazione e timeout delle richieste HTTP."""
+def create_client(settings: Settings, *, streaming: bool = False) -> AsyncOpenAI:
+    """Lo stream non ha un timeout di lettura; connessione e richieste ordinarie sì."""
     return AsyncOpenAI(
         base_url=str(settings.base_url),
         api_key=settings.api_key.get_secret_value(),
-        timeout=settings.timeout,
+        timeout=Timeout(settings.timeout, read=None) if streaming else settings.timeout,
         max_retries=0,
     )
 
@@ -32,7 +31,7 @@ async def list_models(settings: Settings) -> list[str]:
 
 
 def create_model(config: ModelConfig, client: AsyncOpenAI) -> OpenAIChatModel:
-    """Adattatore per i POST /v1/chat/completions di PydanticAI, anche in streaming."""
+    """Adattatore per i POST /v1/chat/completions del generatore della lettera."""
     return OpenAIChatModel(
         config.model,
         provider=OpenAIProvider(openai_client=client),

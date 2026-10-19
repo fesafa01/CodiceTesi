@@ -95,6 +95,8 @@ CREATE TABLE IF NOT EXISTS module_coverage (
     status varchar(40) NOT NULL,
     PRIMARY KEY (episode_id, path)
 );
+-- Metadati storici dei dataset esterni. La compilazione corrente legge il
+-- contratto versionato incluso nel pacchetto, non questa tabella.
 CREATE TABLE IF NOT EXISTS letter_templates (
     id varchar(100) PRIMARY KEY,
     version integer NOT NULL,
@@ -114,3 +116,18 @@ CREATE TABLE IF NOT EXISTS state_revisions (
     run_id varchar(36) NOT NULL,
     "current_time" timestamptz NOT NULL
 );
+
+-- Contratto documentale neutro: gli ID clinici ignoti restano null nel payload.
+-- Separato dalle tabelle storiche, che richiedono anagrafica e date complete.
+CREATE TABLE IF NOT EXISTS composition_contexts (
+    id text PRIMARY KEY,
+    payload jsonb NOT NULL,
+    CHECK (payload->>'id' = id)
+);
+CREATE TABLE IF NOT EXISTS composition_sources (
+    id text PRIMARY KEY,
+    context_id text NOT NULL REFERENCES composition_contexts(id),
+    payload jsonb NOT NULL,
+    CHECK (payload->>'id' = id AND payload->>'context_id' = context_id)
+);
+CREATE INDEX IF NOT EXISTS ix_composition_source_context ON composition_sources(context_id);

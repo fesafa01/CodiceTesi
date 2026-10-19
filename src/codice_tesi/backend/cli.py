@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import logging
+from pathlib import Path
 
 from psycopg import Error as DatabaseError
 from psycopg_pool import PoolTimeout
@@ -18,6 +19,7 @@ from codice_tesi.backend.repository import ClinicalError, snapshot
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Espone operazioni amministrative esplicite, separate dall'API di lettura."""
     parser = argparse.ArgumentParser(description="Backend clinico sintetico della tesi.")
     parser.add_argument(
         "--dataset-dir", help="Directory esterna del dataset da validare/importare."
@@ -29,6 +31,8 @@ def main(argv: list[str] | None = None) -> None:
     commands.add_parser("init", help="Crea soltanto le tabelle, senza caricare dati clinici.")
     commands.add_parser("validate-dataset", help="Valida il dataset senza scrivere nel database.")
     commands.add_parser("serve", help="Avvia l'API clinica di sola lettura.")
+    ecream = commands.add_parser("import-ecream", help="Importa notes.jsonl in contesti isolati.")
+    ecream.add_argument("path", type=Path, help="Percorso esplicito al file notes.jsonl.")
     scenario = commands.add_parser("scenario", help="Controllo del simulatore, separato dall'API.")
     controls = scenario.add_subparsers(dest="control", required=True)
     controls.add_parser("list", help="Elenca gli scenari per il ricercatore.")
@@ -90,6 +94,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 async def run_command(settings, args):
+    """Apre il database per un solo comando; init non carica dati né sceglie template."""
     async with Database(settings) as database:
         if args.command == "init":
             await initialize_database(database)
@@ -98,6 +103,12 @@ async def run_command(settings, args):
         if args.command == "import-dataset":
             changed = await import_dataset(database, settings.dataset_dir)
             print("Dataset importato." if changed else "Dataset già inizializzato e coerente.")
+            return
+        if args.command == "import-ecream":
+            from codice_tesi.backend.composition_importer import import_ecream
+
+            changed, count = await import_ecream(database, args.path)
+            print(f"eCREAM: {count} note. " + ("Importate." if changed else "Già presenti."))
             return
         async with database.connection() as connection:
             if args.control == "list":
