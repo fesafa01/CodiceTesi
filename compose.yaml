@@ -9,7 +9,7 @@ services:
     environment:
       APP_BACKEND_URL: http://backend:8001
     volumes:
-      - discharge-runs:/app/var/runs
+      - ./output/dimissioni:/app/output/dimissioni
     depends_on:
       backend:
         condition: service_healthy
@@ -91,7 +91,6 @@ services:
     security_opt: ["no-new-privileges:true"]
 
 volumes:
-  discharge-runs:
   clinical-db:
     # Persistenza dello schema e degli eventuali dataset importati esplicitamente.
     name: codicetesi_clinical-db-v2

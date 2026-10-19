@@ -18,7 +18,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYDANTIC_AI_NO_BANNER=1
 RUN useradd --uid 10001 --create-home app \
-    && mkdir -p /app/var/runs && chown -R app:app /app/var
+    && mkdir -p /app/output/dimissioni && chown -R app:app /app/output
 USER app
 
 FROM runtime-base AS backend

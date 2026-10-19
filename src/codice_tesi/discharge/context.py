@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.models import CompositionPacket
-from codice_tesi.discharge.policy import validate_plan
 from codice_tesi.discharge.prompts import build_instructions, build_prompt
 
 
@@ -19,7 +18,6 @@ class PreparedRequest:
 def prepare_request(
     packet: CompositionPacket, config: ContextConfig, *, output_tokens: int
 ) -> PreparedRequest:
-    validate_plan(packet)
     instructions, prompt = build_instructions(packet.template), build_prompt(packet)
     messages = [{"role": "system", "content": instructions}, {"role": "user", "content": prompt}]
     # Stima prudenziale, non conteggio del tokenizer del server.

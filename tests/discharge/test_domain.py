@@ -1,4 +1,4 @@
-"""Isolamento del caso, distribuzione deterministica e adapter eCREAM."""
+"""Pacchetto unico, isolamento delle note e adapter eCREAM."""
 
 import json
 
@@ -7,29 +7,25 @@ from pydantic import ValidationError
 
 from codice_tesi.backend.datasets.ecream import load_ecream
 from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
-from codice_tesi.discharge.policy import prepare_packet, validate_plan
+from codice_tesi.discharge.template import load_template
 
 
-def test_template_is_independent_of_sources(packet_factory):
+def test_packet_contains_one_source_list_and_one_template(packet_factory):
     first = packet_factory("anamnesi")
     second = packet_factory("diario")
-    assert first.template == second.template and len(first.sections) == 17
-    assert all(s.sources == first.sections[0].sources for s in first.sections)
-    assert all(len(s.sources) == 1 for s in first.sections)
-    with pytest.raises(ValueError, match="contesti diversi"):
-        prepare_packet(
-            first.context.model_copy(update={"id": "other"}), list(first.sections[5].sources)
-        )
+    assert first.template == second.template and len(first.template.sections) == 17
+    data = first.model_dump(mode="json")
+    assert set(data) == {"schema_version", "context", "sources", "template"}
+    assert data["schema_version"] == "3.0" and len(data["sources"]) == 1
 
 
-def test_source_kind_never_excludes_notes_from_any_field(packet_factory):
-    packet = packet_factory("unknown")
-    assert packet.excluded_source_ids == ()
-    assert all(len(section.sources) == 1 for section in packet.sections)
+def test_source_kind_does_not_filter_notes(packet_factory):
+    packet = packet_factory("unknown", "triage")
+    assert [source.kind for source in packet.sources] == ["unknown", "triage"]
 
 
 def test_episode_requires_verified_identity(packet_factory):
-    data = packet_factory(isolated=True).context.model_dump()
+    data = packet_factory("triage", isolated=True).context.model_dump()
     with pytest.raises(ValidationError):
         Context.model_validate(dict(data, scope="episodio"))
     with pytest.raises(ValidationError):
@@ -38,32 +34,35 @@ def test_episode_requires_verified_identity(packet_factory):
 
 def test_packet_rejects_changed_template_and_foreign_sources(packet_factory):
     data = packet_factory("anamnesi").model_dump(mode="json")
-    data["sections"][5]["sources"][0]["context_id"] = "other"
+    data["sources"][0]["context_id"] = "other"
     with pytest.raises(ValidationError, match="fuori contesto"):
         CompositionPacket.model_validate(data)
     data = packet_factory("anamnesi").model_dump(mode="json")
     data["template"]["sections"][0]["title"] = "Titolo alterato"
-    with pytest.raises(ValueError, match="Template"):
-        validate_plan(CompositionPacket.model_validate(data))
+    with pytest.raises(ValidationError, match="Template"):
+        CompositionPacket.model_validate(data)
 
 
-def test_policy_rejects_source_omitted_from_an_allowed_section(packet_factory):
-    data = packet_factory("anamnesi").model_dump(mode="json")
-    data["sections"][6]["sources"] = []
-    with pytest.raises(ValueError, match="Piano"):
-        validate_plan(CompositionPacket.model_validate(data))
+@pytest.mark.parametrize("invalid", ["empty", "duplicate", "unordered", "old_schema"])
+def test_packet_rejects_invalid_source_lists_and_old_schema(packet_factory, invalid):
+    data = packet_factory("anamnesi", "diario").model_dump(mode="json")
+    if invalid == "empty":
+        data["sources"] = []
+    elif invalid == "duplicate":
+        data["sources"].append(data["sources"][0])
+    elif invalid == "unordered":
+        data["sources"].reverse()
+    else:
+        data["schema_version"] = "2.0"
+        data["sections"] = [{"section_id": "anamnesi", "sources": data.pop("sources")}]
+    with pytest.raises(ValidationError):
+        CompositionPacket.model_validate(data)
 
 
 def test_source_hash_is_checked(packet_factory):
-    data = packet_factory("anamnesi").sections[5].sources[0].model_dump()
+    data = packet_factory("anamnesi").sources[0].model_dump()
     with pytest.raises(ValidationError, match="Hash"):
         EvidenceSource.model_validate(dict(data, text="Testo modificato"))
-
-
-def test_multiple_sources_have_stable_order(packet_factory):
-    packet = packet_factory("anamnesi", "anamnesi")
-    sources = list(packet.sections[5].sources)
-    assert prepare_packet(packet.context, sources[::-1]) == prepare_packet(packet.context, sources)
 
 
 def test_ecream_never_infers_patient_episode_or_uses_crf_annotations(tmp_path):
@@ -107,6 +106,8 @@ def test_repeated_note_id_groups_distinct_notes_without_combining_other_ids(tmp_
         c.scope == "gruppo_note" and c.patient_id is None and c.episode_id is None
         for c, _ in grouped
     )
-    packet = prepare_packet(grouped[0][0], [s for _, s in grouped])
-    assert all(len(section.sources) == 2 for section in packet.sections)
-    assert all("Testo C" not in s.text for section in packet.sections for s in section.sources)
+    packet = CompositionPacket(
+        context=grouped[0][0], sources=tuple(s for _, s in grouped), template=load_template()
+    )
+    assert len(packet.sources) == 2
+    assert all("Testo C" not in s.text for s in packet.sources)

@@ -43,8 +43,7 @@ def test_ecream_import_and_http_isolation(empty_settings, tmp_path):
         assert first == client.get("/api/v1/compilazione/avvio-test?seed=42").json()
         packet = client.get("/api/v1/compilazione/contesti/ecream-note-1/pacchetto").json()
         assert packet["context"]["patient_id"] is None
-        for section in packet["sections"]:
-            assert all(s["id"] == "ecream-1" for s in section["sources"])
+        assert [s["id"] for s in packet["sources"]] == ["ecream-1"]
         assert client.post("/api/v1/compilazione/avvio-test?seed=42").status_code == 405
 
 
@@ -73,7 +72,7 @@ def test_neutral_repository_supports_verified_episode_with_multiple_sources(empt
 
     async def prepare():
         async with Database(empty_settings) as db:
-            assert await save_dataset(db, [context], sources) == (True, 1)
+            assert await save_dataset(db, [context], sources[::-1]) == (True, 1)
             assert await save_dataset(db, [context], sources) == (False, 1)
 
     asyncio.run(prepare())
@@ -82,11 +81,8 @@ def test_neutral_repository_supports_verified_episode_with_multiple_sources(empt
         assert response.status_code == 200
         packet = response.json()
         assert packet["context"]["patient_id"] == "patient-x"
-        assert packet["schema_version"] == "2.0"
-        assert all(
-            [s["id"] for s in field["sources"]] == ["source-0", "source-1"]
-            for field in packet["sections"]
-        )
+        assert packet["schema_version"] == "3.0"
+        assert [s["id"] for s in packet["sources"]] == ["source-0", "source-1"]
         assert packet["template"] == client.get("/api/v1/compilazione/template").json()
 
 
@@ -111,12 +107,11 @@ def test_same_note_id_imports_one_context_with_all_distinct_texts(empty_settings
         packet = client.get("/api/v1/compilazione/contesti/ecream-note-11/pacchetto").json()
         assert packet["context"]["scope"] == "gruppo_note"
         assert packet["context"]["patient_id"] is None
-        assert packet["policy_version"] == "campus-context-v2"
-        for field in packet["sections"]:
-            assert len(field["sources"]) == 2
-            assert {s["text"] for s in field["sources"]} == {first["text"], rows[1]["text"]}
+        assert set(packet) == {"schema_version", "context", "sources", "template"}
+        assert len(packet["sources"]) == 2
+        assert {s["text"] for s in packet["sources"]} == {first["text"], rows[1]["text"]}
+        for source in packet["sources"]:
+            assert json.dumps(packet).count(json.dumps(source["text"])) == 1
         other = client.get("/api/v1/compilazione/contesti/ecream-note-12/pacchetto").json()
-        assert all(
-            len(f["sources"]) == 1 and f["sources"][0]["text"] == rows[2]["text"]
-            for f in other["sections"]
-        )
+        assert len(other["sources"]) == 1
+        assert other["sources"][0]["text"] == rows[2]["text"]

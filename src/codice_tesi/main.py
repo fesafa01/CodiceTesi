@@ -31,8 +31,8 @@ def main(argv: list[str] | None = None) -> None:
     discharge.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("var/runs"),
-        help="Directory dei risultati; ogni esecuzione crea una sottocartella distinta.",
+        default=Path("output/dimissioni"),
+        help="Directory base; salva in <directory>/<contesto>/<esecuzione>/.",
     )
     discharge.add_argument(
         "--context-window",

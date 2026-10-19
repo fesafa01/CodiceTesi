@@ -43,7 +43,7 @@ async def run_application(
     print(f"Contesto: {packet.context.id} ({packet.context.scope})", flush=True)
     print(f"Cartella: {artifacts.directory}", flush=True)
     print(
-        f"Note nel contesto: {len(packet.sections[0].sources)}; "
+        f"Note nel contesto: {len(packet.sources)}; "
         f"campi Campus: {len(packet.template.sections)}; richieste LLM: 1",
         flush=True,
     )
@@ -54,7 +54,7 @@ async def run_application(
     print("Redazione in streaming. Ctrl+C conserva il testo parziale.\n", flush=True)
     generator = None
     try:
-        with artifacts.partial.open("x", encoding="utf-8") as output:
+        with artifacts.open_draft() as output:
             async with api.create_client(settings or Settings(), streaming=True) as client:
                 generator = LLMDraftGenerator(config, client)
                 artifacts.start()
@@ -63,9 +63,6 @@ async def run_application(
                         output.write(chunk)
                         output.flush()
                         print(chunk, end="", flush=True)
-            if not artifacts.partial.read_text(encoding="utf-8").strip():
-                raise ValueError("Il modello non ha prodotto testo.")
-        artifacts.partial.replace(artifacts.draft)
         artifacts.finish("bozza_da_revisionare", usage=generator.usage)
     except BaseException as exc:
         artifacts.finish(

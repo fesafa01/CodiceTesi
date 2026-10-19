@@ -12,6 +12,7 @@ dist
 build
 data
 var
+output
 
 # Documentazione e strumenti offline non necessari alle immagini runtime.
 docs

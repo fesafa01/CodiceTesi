@@ -2,7 +2,7 @@
 
 from pydantic import Field
 
-from codice_tesi.discharge.models import Contract
+from codice_tesi.discharge.contracts import Contract
 
 
 class ContextConfig(Contract):

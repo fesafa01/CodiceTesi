@@ -210,6 +210,7 @@ tempCodeRunnerFile.py
 
 # Database e stato locale del backend sintetico
 /var/
+/output/dimissioni/
 
 # PyPI configuration file
 .pypirc

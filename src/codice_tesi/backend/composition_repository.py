@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 from codice_tesi.backend.database import Database
 from codice_tesi.backend.repository import ClinicalError
 from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
-from codice_tesi.discharge.policy import prepare_packet
+from codice_tesi.discharge.template import load_template
 
 
 async def save_dataset(
@@ -54,9 +54,10 @@ async def save_dataset(
 
 
 async def read_packet(database: Database, *, context_id=None, seed=None) -> CompositionPacket:
-    """Legge caso e fonti nello stesso snapshot di sola lettura, poi applica la policy
-    deterministica. La casualità riguarda soltanto il caso iniziale, mai le fonti delle
-    sezioni."""
+    """Legge contesto e note nello stesso snapshot, poi aggiunge il template Campus.
+
+    Il seed seleziona soltanto il contesto; tutte le sue note vengono incluse.
+    """
     async with database.connection(read_only=True) as connection:
         if context_id is None:
             cursor = await connection.execute("SELECT id FROM composition_contexts ORDER BY id")
@@ -83,4 +84,4 @@ async def read_packet(database: Database, *, context_id=None, seed=None) -> Comp
             if source.id != row["id"]:
                 raise ValueError("Identità della fonte incoerente con il database.")
             sources.append(source)
-        return prepare_packet(context, sources)
+        return CompositionPacket(context=context, sources=tuple(sources), template=load_template())

@@ -1,17 +1,19 @@
 # Backend clinico
 
-Dal 18 ottobre è disponibile la [compilazione deterministica](compilazione.md):
+Per il flusso di generazione e i comandi vedere il [README](../README.md).
+
+L'importazione delle note è deterministica:
 `import-ecream <notes.jsonl>` alimenta `composition_contexts` e `composition_sources`.
 `GET /api/v1/compilazione/avvio-test?seed=<intero>` seleziona il contesto del test
 ed espone tutte le sezioni; `GET /api/v1/compilazione/contesti/{id}/pacchetto`
-usa un contesto fissato. I pacchetti schema 2.0 incorporano il template unico
+usa un contesto fissato. I pacchetti schema 3.0 contengono `context`,
+un unico elenco `sources` e il template
 `campus-discharge` 1.0.0, esposto anche da `GET /api/v1/compilazione/template`.
 I metadati importati in `letter_templates` restano storici e il relativo endpoint
 `/api/v1/modelli/{id}` è deprecato per la nuova compilazione. L'aggregatore riceve il pacchetto senza accedere al DB.
 Le API sotto restano disponibili per il contratto precedente; eCREAM non le
 popola con anagrafiche o ricoveri inventati.
 
-Stato del 17 ottobre 2026: il vecchio dataset generato è stato rimosso.
 Il backend conserva API di lettura, repository PostgreSQL, adattatore FHIR R4B
 e strumenti di importazione, ma **non carica dati all'avvio**.
 
@@ -109,7 +111,9 @@ La CI fornisce PostgreSQL e non dipende da file clinici nella repository.
 
 La compilazione legge tutte le fonti di `composition_sources` con il medesimo
 `context_id` (per eCREAM: `ecream-note-<note_id>`), ordinate e nello stesso snapshot.
-Ogni campo riceve l'intero gruppo; non viene applicata selezione per tipo nota.
+Il pacchetto contiene l'intero gruppo una sola volta insieme al template Campus.
+Non viene applicata selezione per campo o tipo nota.
 L'importatore raggruppa righe per `note_id`, conserva ogni testo distinto e deduplica
 le ripetizioni identiche dovute alle annotazioni. I contesti vengono salvati una
-sola volta anche quando hanno più fonti. La policy attiva è `campus-context-v2`.
+sola volta anche quando hanno più fonti. Lo schema HTTP è `3.0`; le tabelle
+restano invariate. Aggiornare backend e applicazione insieme.

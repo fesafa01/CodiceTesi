@@ -18,7 +18,7 @@ Dalla cartella `CodiceTesi/`, con Docker e Spark attivi:
 docker compose up --build -d backend
 uv run --locked --no-editable python main.py dimissione \
   --contesto ecream-note-2136 \
-  --output-dir var/runs \
+  --output-dir output/dimissioni \
   --backend-url http://127.0.0.1:8001 \
   --context-window 32768
 ```
@@ -50,7 +50,7 @@ Per l'avvio locale servono Python 3.13 e `uv`.
 | `--no-editable` | Installa il pacchetto normalmente; la cache segue sorgenti e template. |
 | `python main.py dimissione` | Genera tutta la lettera con una sola richiesta in streaming. |
 | `--contesto` | ID del contesto del database da elaborare, senza scelta casuale. |
-| `--output-dir` | Directory base dei risultati; viene creata una sottocartella per esecuzione. |
+| `--output-dir` | Directory base dei risultati; ogni contesto contiene sottocartelle per esecuzione. |
 | `--backend-url` | URL del backend clinico, non dello Spark. |
 | `--context-window` | Budget stimato della richiesta: note, istruzioni Campus, output e margine. |
 
@@ -70,7 +70,11 @@ Senza argomenti parte `dimissione` con un seed registrato automaticamente.
 
 Il programma stampa subito la directory di esecuzione e il riepilogo:
 numero di note, 17 campi Campus e **una richiesta LLM**.
-Ogni avvio crea una cartella distinta sotto `var/runs/` o `--output-dir`:
+La destinazione predefinita è `output/dimissioni/<contesto>/<esecuzione>/`,
+relativa alla cartella da cui avvii il comando. Per esempio:
+`output/dimissioni/ecream-note-2136/20261019T120000Z-a1b2c3d4/`.
+Il terminale stampa il percorso assoluto. `--output-dir` cambia la directory base.
+Ogni esecuzione contiene:
 
 - **`bozza.parziale.txt`**: unico file aperto e aggiornato a ogni frammento dello stream.
 - **`bozza.txt`**: lo stesso file rinominato alla conclusione normale della risposta.
@@ -87,19 +91,19 @@ certifica correttezza clinica, completezza o rispetto delle intestazioni.
 L'ordine e la copertura dei campi sono istruzioni al modello, non una validazione
 strutturale del testo libero.
 
-In Docker i risultati persistono nel volume `discharge-runs`, su `/app/var/runs`.
-Per salvare direttamente i TXT sul computer:
+Anche Docker salva nella cartella locale `output/dimissioni/`, collegata al
+container da Compose. Non serve un volume aggiuntivo:
 
 ```bash
-mkdir -p var/runs
-docker compose run --build --rm \
-  -v "$PWD/var/runs:/app/var/runs" \
-  app dimissione --contesto ecream-note-2136
+docker compose run --build --rm app dimissione --contesto ecream-note-2136
 ```
 
-`run` crea il container del servizio `app`, `--build` aggiorna l'immagine,
-`--rm` rimuove il container al termine e `-v` collega la directory locale ai
-risultati nel container. L'URL backend interno è già configurato da Compose.
+`run` crea il container del servizio `app`, `--build` aggiorna l'immagine e
+`--rm` rimuove il container al termine. I risultati restano sul computer.
+L'URL backend interno è già configurato da Compose. Per un'altra destinazione
+sul computer modifica il percorso a sinistra del bind mount in `compose.yaml`.
+Le precedenti esecuzioni in `var/runs/` o nel vecchio volume Docker restano lì;
+non vengono spostate né cancellate automaticamente.
 
 ## Configurazione e streaming
 
@@ -133,8 +137,10 @@ interrompere conservando il testo. Il ragionamento interno non viene stampato.
 `templates/campus_discharge.v1.json` è la definizione canonica dei campi.
 `generator.py` contiene l'unico agente, `context.py` verifica il budget e
 `artifacts.py` conserva richiesta, testo ed esito.
-Il backend mantiene il contratto `campus-context-v2`; questa modifica non
-richiede migrazioni del database né cambiamenti alle note importate.
+Il pacchetto HTTP usa lo schema `3.0`: `context`, `sources` e `template`.
+Le note sono presenti una sola volta; non esiste un piano di fonti per sezione.
+I controlli del pacchetto sono in `discharge/models.py`. Backend e applicazione
+vanno aggiornati insieme; non servono migrazioni del database o nuove importazioni.
 
 Il JSONL eCREAM locale contiene 4.047 ID distinti, attualmente un testo per ID.
 L'importatore supporta più testi dello stesso `note_id`, deduplica quelli identici
@@ -152,5 +158,5 @@ I test SSE usano un endpoint simulato. I test PostgreSQL richiedono
 Le chiavi di cache uv includono sorgenti e template per aggiornare il pacchetto
 anche con `--no-editable`. Le immagini usano `uv.lock` e un utente senza privilegi.
 
-La [guida](docs/compilazione.md) descrive il flusso e i comandi.
 La [guida del backend](docs/backend.md) documenta importazione e API.
+Il [contratto dei dati](docs/dataset.md) descrive il loader JSON/PDF opzionale.

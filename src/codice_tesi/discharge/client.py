@@ -6,26 +6,20 @@ from urllib.parse import quote, urlencode
 from urllib.request import urlopen
 
 from codice_tesi.discharge.models import CompositionPacket
-from codice_tesi.discharge.policy import validate_plan
 
 
 class PacketClient:
-    """Client riservato all’orchestratore. Recupera un solo snapshot e verifica che caso e
-    template siano quelli attesi prima di introdurli nella memoria di stesura."""
+    """Recupera e valida il pacchetto prima della generazione."""
 
     def __init__(self, base_url: str, *, timeout: float = 20):
-        """Imposta URL e timeout del backend clinico; non riceve credenziali SQL o
-        riferimenti al generatore."""
         self.base_url, self.timeout = base_url.rstrip("/"), timeout
 
     async def fetch(self, *, seed: int, context_id: str | None) -> CompositionPacket:
-        """Esegue la lettura bloccante HTTP in un thread, mantenendo libera la coroutine
-        applicativa."""
+        """Esegue la lettura HTTP bloccante in un thread."""
         return await asyncio.to_thread(self._fetch, seed=seed, context_id=context_id)
 
     def _fetch(self, *, seed: int, context_id: str | None) -> CompositionPacket:
-        """Sceglie l’endpoint in base al contesto fissato o al seed e valida il pacchetto. Un
-        cambio di identità o template viene rifiutato, non corretto dal modello."""
+        """Sceglie l'endpoint e rifiuta un contesto diverso da quello richiesto."""
         path = (
             f"/contesti/{quote(context_id, safe='')}/pacchetto"
             if context_id
@@ -35,7 +29,7 @@ class PacketClient:
             with urlopen(
                 self.base_url + "/api/v1/compilazione" + path, timeout=self.timeout
             ) as reply:
-                packet = validate_plan(CompositionPacket.model_validate_json(reply.read()))
+                packet = CompositionPacket.model_validate_json(reply.read())
         except HTTPError as exc:
             raise ValueError(
                 f"Backend HTTP {exc.code}: verificare contesto e importazione con import-ecream."

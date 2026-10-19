@@ -4,8 +4,8 @@ import hashlib
 
 import pytest
 
-from codice_tesi.discharge.models import Context, EvidenceSource
-from codice_tesi.discharge.policy import prepare_packet
+from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
+from codice_tesi.discharge.template import load_template
 
 
 @pytest.fixture
@@ -33,6 +33,6 @@ def packet_factory():
             )
             for i, kind in enumerate(kinds)
         ]
-        return prepare_packet(context, sources)
+        return CompositionPacket(context=context, sources=tuple(sources), template=load_template())
 
     return create

@@ -1,4 +1,4 @@
-"""Contratto indipendente dal dataset e piano deterministico della dimissione."""
+"""Contesto, note e template della singola richiesta di dimissione."""
 
 import hashlib
 from typing import Literal
@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from codice_tesi.discharge.contracts import Contract
-from codice_tesi.discharge.template import LetterTemplate
+from codice_tesi.discharge.template import LetterTemplate, load_template
 
 
 class Context(Contract):
@@ -51,39 +51,22 @@ class EvidenceSource(Contract):
         return self
 
 
-class SectionInput(Contract):
-    """Associazione calcolata dal codice tra una sezione del template e le sue fonti."""
-
-    section_id: str
-    sources: tuple[EvidenceSource, ...]
-
-
 class CompositionPacket(Contract):
-    """Snapshot: stesso contesto di note per tutti i campi, senza filtro per tipologia."""
+    """Un solo contesto con tutte le note e il template Campus canonico."""
 
-    schema_version: Literal["2.0"] = "2.0"
-    policy_version: str = "campus-context-v2"
+    schema_version: Literal["3.0"] = "3.0"
     template: LetterTemplate
     context: Context
-    sections: tuple[SectionInput, ...]
-    excluded_source_ids: tuple[str, ...] = ()
+    sources: tuple[EvidenceSource, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def isolation(self):
-        """Verifica ordine, identità e versioni prima di aprire una sessione di stesura."""
-        if tuple(s.section_id for s in self.sections) != tuple(
-            s.id for s in self.template.sections
-        ):
-            raise ValueError("Piano delle sezioni diverso dal template.")
-        seen = {}
-        for section in self.sections:
-            ids = [source.id for source in section.sources]
-            if ids != sorted(set(ids)):
-                raise ValueError("Le fonti devono essere univoche e ordinate.")
-            for source in section.sources:
-                if source.context_id != self.context.id:
-                    raise ValueError("Fonte fuori contesto.")
-                if source.id in seen and seen[source.id] != source:
-                    raise ValueError("Versioni discordanti della stessa fonte.")
-                seen[source.id] = source
+        """Valida una volta template, ordine e appartenenza delle note."""
+        if self.template != load_template():
+            raise ValueError("Template non aggiornato: ricostruire anche il backend.")
+        ids = [source.id for source in self.sources]
+        if ids != sorted(set(ids)):
+            raise ValueError("Le fonti devono essere univoche e ordinate.")
+        if any(source.context_id != self.context.id for source in self.sources):
+            raise ValueError("Fonte fuori contesto.")
         return self

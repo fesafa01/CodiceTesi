@@ -67,7 +67,7 @@ def _text_rule(instruction: str) -> str:
 
 
 def build_prompt(packet: CompositionPacket) -> str:
-    """Invia le note una sola volta, senza duplicarle per i 17 campi del pacchetto HTTP."""
+    """Inserisce il contesto e tutte le note del pacchetto, una sola volta."""
     context = packet.context
     lines = [
         "CONTESTO VERIFICATO",
@@ -78,8 +78,7 @@ def build_prompt(packet: CompositionPacket) -> str:
         "",
         "TUTTE LE NOTE DEL CONTESTO SELEZIONATO",
     ]
-    # validate_plan controlla che ogni sezione contenga lo stesso contesto completo.
-    for source in packet.sections[0].sources:
+    for source in packet.sources:
         lines.extend(
             [
                 f"INIZIO NOTA {source.id} (tipo: {source.kind})",

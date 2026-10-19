@@ -58,7 +58,7 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
             assert [m["role"] for m in body["messages"]] == ["system", "user"]
             for i, field in enumerate(packet.template.sections, 1):
                 assert f"{i}. {field.title}\n" in body["messages"][0]["content"]
-            for source in packet.sections[0].sources:
+            for source in packet.sources:
                 assert body["messages"][1]["content"].count(f"INIZIO NOTA {source.id}") == 1
             return httpx.Response(
                 200, headers={"Content-Type": "text/event-stream"}, stream=Stream()
@@ -159,7 +159,7 @@ def test_truncated_response_keeps_partial_and_does_not_retry(
     else:
         with pytest.raises(ValueError, match="parziale"):
             run()
-        directory = next(tmp_path.iterdir())
+        directory = next(tmp_path.rglob("bozza.parziale.txt")).parent
         assert (directory / "bozza.parziale.txt").read_text() == "Testo"
         assert not (directory / "bozza.txt").exists()
     assert len(calls) == 1
@@ -187,7 +187,7 @@ def test_error_or_cancellation_keeps_already_written_text(
     monkeypatch.setattr(application, "LLMDraftGenerator", Generator)
     with pytest.raises(failure):
         asyncio.run(application.run_application(backend_url="http://test", output_dir=tmp_path))
-    directory = next(tmp_path.iterdir())
+    directory = next(tmp_path.rglob("bozza.parziale.txt")).parent
     assert (directory / "bozza.parziale.txt").read_text() == "Testo già scritto."
     assert not (directory / "bozza.txt").exists()
     report = json.loads((directory / "esito.json").read_text())
@@ -227,12 +227,50 @@ def test_dry_run_saves_one_exact_request_without_client_or_placeholders(
     directory = asyncio.run(
         application.run_application(backend_url="http://test", output_dir=tmp_path, dry_run=True)
     )
+    assert directory.parent == tmp_path / packet.context.id
     assert {p.name for p in directory.iterdir()} == {"richiesta.txt", "esito.json"}
     text = (directory / "richiesta.txt").read_text()
     request = prepare_request(packet, ContextConfig(), output_tokens=8192)
     assert text == f"ISTRUZIONI\n\n{request.instructions}\n\nCONTESTO E NOTE\n\n{request.prompt}"
     report = json.loads((directory / "esito.json").read_text())
     assert report["richieste_llm_previste"] == 1 and report["richieste_llm_avviate"] == 0
+
+
+def test_output_groups_runs_without_overwriting_and_handles_context_paths(
+    packet_factory, tmp_path, monkeypatch
+):
+    from codice_tesi.discharge.models import CompositionPacket
+
+    packet = packet_factory("anamnesi")
+
+    async def fetch(self, **kwargs):
+        return packet
+
+    monkeypatch.setattr(application.PacketClient, "fetch", fetch)
+    monkeypatch.setattr(api, "create_client", lambda *a, **k: pytest.fail("LLM in dry-run"))
+
+    def run():
+        return asyncio.run(
+            application.run_application(
+                backend_url="http://test", output_dir=tmp_path, dry_run=True
+            )
+        )
+
+    first, second = run(), run()
+    assert first != second and first.parent == second.parent == tmp_path / packet.context.id
+    assert (first / "richiesta.txt").read_text() == (second / "richiesta.txt").read_text()
+    parents = []
+    for context_id in ("../../fuori", "..", "a/b", "a?b"):
+        data = packet.model_dump(mode="json")
+        data["context"]["id"] = context_id
+        for source in data["sources"]:
+            source["context_id"] = context_id
+        packet = CompositionPacket.model_validate(data)
+        directory = run()
+        assert directory.parent.parent == tmp_path
+        assert json.loads((directory / "esito.json").read_text())["contesto"]["id"] == context_id
+        parents.append(directory.parent)
+    assert len(set(parents)) == len(parents)
 
 
 def test_oversized_notes_fail_before_creating_client(packet_factory, tmp_path, monkeypatch):
@@ -258,4 +296,4 @@ def test_default_cli_still_runs_document_workflow(monkeypatch):
 
     monkeypatch.setattr(application, "run_application", run)
     main.main([])
-    assert calls[0]["context_id"] is None and calls[0]["output_dir"] == Path("var/runs")
+    assert calls[0]["context_id"] is None and calls[0]["output_dir"] == Path("output/dimissioni")

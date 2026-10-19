@@ -1,7 +1,9 @@
 # Contratto dei dati e importazione
 
-La repository non contiene più il dataset clinico generato. Il servizio si
-inizializza senza dati: non ricrea pazienti, documenti, template o scenari.
+Per importare le note eCREAM e generare la bozza Campus vedere il
+[README](../README.md). Questo documento descrive il loader JSON/PDF opzionale.
+Il servizio si inizializza senza dati: non ricrea pazienti, documenti, template
+o scenari.
 
 ## Loader locale conservato
 
