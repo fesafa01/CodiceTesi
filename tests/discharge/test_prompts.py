@@ -18,6 +18,7 @@ def test_all_campus_sections_and_subfields_are_in_instructions_in_order(packet_f
     assert positions == sorted(positions)
     assert "Non disponibile nelle note fornite." in text
     assert "CAMPO CORRENTE" not in text and "schema_output" not in text
+    assert "patient_id" not in text and "episode_id" not in text
 
 
 def test_all_notes_are_included_once(packet_factory):
@@ -34,4 +35,4 @@ def test_all_notes_are_included_once(packet_factory):
 def test_request_rejects_context_budget_before_inference_without_truncating_notes(packet_factory):
     packet = packet_factory("anamnesi", text="Fonte ampia. " * 10000)
     with pytest.raises(ValueError, match="Nessuna nota è stata troncata"):
-        prepare_request(packet, ContextConfig(), output_tokens=8192)
+        prepare_request(packet, ContextConfig(window_tokens=32768), output_tokens=8192)

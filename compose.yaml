@@ -38,6 +38,8 @@ services:
       context: .
       target: backend
     command: ["init"]
+    volumes:
+      - ../datasets_pubblici/synthea_dimissioni:/dataset:ro
     environment: &clinical-environment
       CLINICAL_DATABASE_URL: postgresql://clinico:clinico_sintetico@db:5432/clinico
       CLINICAL_HOST: 0.0.0.0

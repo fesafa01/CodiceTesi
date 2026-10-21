@@ -72,7 +72,8 @@ def test_model_configuration_is_only_from_python(monkeypatch):
     assert config.temperature == 0.3
     assert config.top_k == 30
     assert ModelConfig().model == "deepseek-v4-flash"
-    assert ModelConfig().temperature == 0
+    assert ModelConfig().temperature == 0.6
+    assert ModelConfig().thinking is True
 
 
 @pytest.mark.parametrize("overrides", [{"base_url": "invalid"}, {"timeout": 0}])
@@ -85,6 +86,7 @@ def test_invalid_connection_configuration(overrides):
     "overrides",
     [
         {"max_tokens": 0},
+        {"first_text_timeout": 0},
         {"temperature": -0.1},
         {"top_p": 1.1},
         {"top_k": 0},
@@ -100,12 +102,21 @@ def test_invalid_configuration(overrides):
 
 
 def test_model_configuration_validates_python_assignments():
-    config = ModelConfig()
+    config = ModelConfig(max_tokens=8192)
     config.temperature = 0.2
     assert config.request_settings().get("temperature") == 0.2
     with pytest.raises(ValidationError):
         config.max_tokens = 0
     assert config.max_tokens == 8192
+
+
+def test_thinking_is_explicit_and_effort_only_applies_when_enabled():
+    settings = ModelConfig(top_k=20, thinking=False).request_settings()
+    assert settings["extra_body"] == {"top_k": 20, "thinking": {"type": "disabled"}}
+    assert "openai_reasoning_effort" not in settings
+    enabled = ModelConfig(thinking=True).request_settings()
+    assert enabled["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert enabled["openai_reasoning_effort"] == "low"
 
 
 def test_connection_failure_has_actionable_message(monkeypatch, capsys):

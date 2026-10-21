@@ -6,19 +6,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ModelConfig(BaseModel):
-    """Configurazione della redazione in streaming; max_tokens è il limite per l’intera lettera."""
+    """Redazione in streaming; max_tokens comprende anche l'eventuale ragionamento."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True, validate_default=True)
 
     model: str = Field(default="deepseek-v4-flash", min_length=1)
-    max_tokens: int = Field(default=8192, gt=0)
-    temperature: float | None = Field(default=0, ge=0)
-    top_p: float | None = Field(default=None, ge=0, le=1)
+    max_tokens: int = Field(default=32768, gt=0)
+    temperature: float | None = Field(default=0.6, ge=0)
+    top_p: float | None = Field(default=0.95, ge=0, le=1)
     top_k: int | None = Field(default=None, gt=0)
     min_p: float | None = Field(default=None, ge=0, le=1)
     stop: list[str] | None = None
     seed: int | None = None
+    thinking: bool = True
     reasoning_effort: str | None = Field(default="low", min_length=1)
+    first_text_timeout: float = Field(default=240, gt=0)
 
     def request_settings(self) -> OpenAIChatModelSettings:
         """Traduce i nomi del server nei campi PydanticAI, omettendo quelli non impostati."""
@@ -28,11 +30,11 @@ class ModelConfig(BaseModel):
         )
         if self.stop is not None:
             values["stop_sequences"] = self.stop
-        if self.reasoning_effort is not None:
+        if self.thinking and self.reasoning_effort is not None:
             values["openai_reasoning_effort"] = self.reasoning_effort
         extra = self.model_dump(include={"top_k", "min_p"}, exclude_none=True)
-        if extra:
-            values["extra_body"] = extra
+        extra["thinking"] = {"type": "enabled" if self.thinking else "disabled"}
+        values["extra_body"] = extra
         return OpenAIChatModelSettings(**values)
 
 

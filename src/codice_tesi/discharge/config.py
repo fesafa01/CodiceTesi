@@ -10,5 +10,5 @@ class ContextConfig(Contract):
     """Budget applicativo della richiesta, distinto dalla capacità effettiva del server. Il
     margine copre differenze di tokenizzazione e framing; non autorizza troncamenti."""
 
-    window_tokens: int = Field(default=32768, gt=0)
+    window_tokens: int = Field(default=196608, gt=0)
     safety_margin_tokens: int = Field(default=1024, ge=0)

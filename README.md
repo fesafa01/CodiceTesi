@@ -1,169 +1,33 @@
 # CodiceTesi
 
-L'applicazione invia **una sola richiesta allo Spark** con tutte le note del
-`note_id` selezionato e tutti i campi Campus nelle istruzioni. Il modello redige
-la bozza in ordine, campo per campo, in una sola risposta in streaming.
-Ogni frammento viene mostrato nel terminale e salvato nello stesso TXT.
+Bozza Campus dai 30 ricoveri sintetici Synthea FHIR R4. Il contesto comprende solo
+la degenza selezionata e l'anamnesi riportata nelle sue note; gli originali restano
+in `../datasets_pubblici/synthea_dimissioni`.
 
-Il backend raggruppa le note deterministicamente. Il tipo di nota non esclude
-alcun campo. L'agente valuta quali informazioni siano disponibili; dove mancano
-dati scrive una breve indicazione. L'ordine dei campi è richiesto nel prompt,
-non gestito con chiamate separate. L'agente non ha tool né accesso al database.
-
-## Avvio
-
-Dalla cartella `CodiceTesi/`, con Docker e Spark attivi:
+Con Docker, Tailscale e server LLM attivi, dalla cartella del progetto:
 
 ```bash
 docker compose up --build -d backend
-uv run --locked --no-editable python main.py dimissione \
-  --contesto ecream-note-2136 \
-  --output-dir output/dimissioni \
-  --backend-url http://127.0.0.1:8001 \
-  --context-window 32768
+# Solo per inizializzare o aggiornare le fonti del campione:
+docker compose run --rm backend-admin import-synthea /dataset --replace
+uv run --locked --no-editable python main.py dimissione --contesto synthea-caso-23 --thinking
 ```
 
-Un nuovo database nasce vuoto. Per importare il dataset pubblico eCREAM
-già scaricato, usare esplicitamente:
+Una sola richiesta produce la lettera. `--thinking` abilita il reasoning nella
+stesura; `--no-thinking` lo disabilita. Senza flag vale `ModelConfig.thinking`
+in `src/codice_tesi/config.py` (predefinito: attivo).
+`max_tokens` comprende ragionamento e testo; `first_text_timeout` limita l'attesa
+del primo testo. La connessione usa `LLM_BASE_URL`, `LLM_API_KEY` e `LLM_TIMEOUT`.
+
+Il prompt è in `src/codice_tesi/discharge/prompts.py`; i campi canonici sono in
+`src/codice_tesi/discharge/templates/campus_discharge.v1.json`.
+`--dry-run` salva la richiesta senza inferenza. I risultati vanno in
+`output/dimissioni/<contesto>/<esecuzione>/`: richiesta, bozza ed esito tecnico.
+Ctrl+C o un errore conservano il parziale. Il reasoning interno non viene salvato.
+La bozza richiede revisione medica.
 
 ```bash
-docker compose run --rm \
-  -v "$PWD/../datasets_pubblici/ecream_gamma_span:/dataset:ro" \
-  backend-admin import-ecream /dataset/notes.jsonl
-```
-
-Il server LLM dello Spark deve essere raggiungibile tramite Tailscale.
-Compose gestisce backend e PostgreSQL; il server LLM è esterno.
-Le API del backend sono disponibili su <http://localhost:8001/docs>.
-Per l'avvio locale servono Python 3.13 e `uv`.
-
-## Comando locale completo e opzioni
-
-| Parte del comando | Significato |
-| --- | --- |
-| `docker compose up` | Avvia il backend e le dipendenze, incluso PostgreSQL. |
-| `--build` | Aggiorna le immagini dai sorgenti. |
-| `-d` | Lascia i servizi attivi in background. |
-| `backend` | È il servizio da avviare. |
-| `uv run` | Esegue nell'ambiente Python del progetto, sincronizzando le dipendenze. |
-| `--locked` | Richiede che `uv.lock` rimanga invariato e sia coerente col progetto. |
-| `--no-editable` | Installa il pacchetto normalmente; la cache segue sorgenti e template. |
-| `python main.py dimissione` | Genera tutta la lettera con una sola richiesta in streaming. |
-| `--contesto` | ID del contesto del database da elaborare, senza scelta casuale. |
-| `--output-dir` | Directory base dei risultati; ogni contesto contiene sottocartelle per esecuzione. |
-| `--backend-url` | URL del backend clinico, non dello Spark. |
-| `--context-window` | Budget stimato della richiesta: note, istruzioni Campus, output e margine. |
-
-Le barre `\` continuano il comando sulla riga successiva.
-Aggiungere `--dry-run` prepara l'unica richiesta completa, senza inferenza.
-Non contiene segnaposto di campi precedenti: è lo stesso prompt usato dalla
-generazione a parità di dati e configurazione.
-`--seed 42` può sostituire `--contesto` per una selezione casuale riproducibile;
-le due opzioni sono alternative. Il seed non rende deterministico il testo LLM.
-Senza argomenti parte `dimissione` con un seed registrato automaticamente.
-`modelli` elenca i modelli disponibili sullo Spark.
-
-`APP_BACKEND_URL` o `--backend-url` sceglie il backend: default locale
-`http://127.0.0.1:8001`, in Compose `http://backend:8001`.
-
-## Dove si trova la bozza
-
-Il programma stampa subito la directory di esecuzione e il riepilogo:
-numero di note, 17 campi Campus e **una richiesta LLM**.
-La destinazione predefinita è `output/dimissioni/<contesto>/<esecuzione>/`,
-relativa alla cartella da cui avvii il comando. Per esempio:
-`output/dimissioni/ecream-note-2136/20261019T120000Z-a1b2c3d4/`.
-Il terminale stampa il percorso assoluto. `--output-dir` cambia la directory base.
-Ogni esecuzione contiene:
-
-- **`bozza.parziale.txt`**: unico file aperto e aggiornato a ogni frammento dello stream.
-- **`bozza.txt`**: lo stesso file rinominato alla conclusione normale della risposta.
-- `richiesta.txt`: istruzioni con i campi Campus e tutte le note, ciascuna inserita una sola volta.
-- `esito.json`: contesto, fonti, configurazione, consumo ed esito tecnico sintetico.
-
-Ctrl+C, errore di connessione, risposta vuota o limite di output conservano il
-parziale e impediscono la pubblicazione di `bozza.txt`. Non ci sono retry automatici.
-Il testo non viene ricostruito né riscritto tra campi e non ci sono file per sezione.
-I risultati delle esecuzioni precedenti restano nelle rispettive cartelle.
-
-La bozza richiede revisione del medico: una risposta terminata normalmente non
-certifica correttezza clinica, completezza o rispetto delle intestazioni.
-L'ordine e la copertura dei campi sono istruzioni al modello, non una validazione
-strutturale del testo libero.
-
-Anche Docker salva nella cartella locale `output/dimissioni/`, collegata al
-container da Compose. Non serve un volume aggiuntivo:
-
-```bash
-docker compose run --build --rm app dimissione --contesto ecream-note-2136
-```
-
-`run` crea il container del servizio `app`, `--build` aggiorna l'immagine e
-`--rm` rimuove il container al termine. I risultati restano sul computer.
-L'URL backend interno è già configurato da Compose. Per un'altra destinazione
-sul computer modifica il percorso a sinistra del bind mount in `compose.yaml`.
-Le precedenti esecuzioni in `var/runs/` o nel vecchio volume Docker restano lì;
-non vengono spostate né cancellate automaticamente.
-
-## Configurazione e streaming
-
-`ModelConfig` in `src/codice_tesi/config.py` contiene i parametri del modello:
-`deepseek-v4-flash`, temperatura `0`, `8192` token di output per l'intera lettera,
-`reasoning_effort="low"`. Da Python si può passare `ModelConfig(...)` a
-`run_application()`; `None` omette un parametro facoltativo.
-
-`ContextConfig` in `discharge/config.py` imposta il budget della singola richiesta:
-`32768` token stimati, inclusi input, output riservato e margine. La stima usa i
-byte UTF-8 più un framing prudenziale, non il tokenizer del modello.
-Un budget insufficiente interrompe prima dell'inferenza senza tagliare le note.
-
-La connessione usa `Settings` e il `.env` facoltativo, escluso da Git:
-
-```dotenv
-LLM_BASE_URL=http://spark-413e.tail9c981a.ts.net:8000/v1
-LLM_API_KEY=not-required
-LLM_TIMEOUT=300
-```
-
-La generazione non ha timeout di lettura. Restano i timeout di connessione,
-scrittura e pool; le richieste ordinarie come `modelli` hanno un timeout completo.
-Lo streaming non elimina l'attesa iniziale del server. Ctrl+C permette di
-interrompere conservando il testo. Il ragionamento interno non viene stampato.
-
-## Codice, dati e verifiche
-
-`application.py` recupera il contesto, prepara una richiesta e salva lo stream.
-`discharge/prompts.py` è l'unica sede delle istruzioni e del prompt;
-`templates/campus_discharge.v1.json` è la definizione canonica dei campi.
-`generator.py` contiene l'unico agente, `context.py` verifica il budget e
-`artifacts.py` conserva richiesta, testo ed esito.
-Il pacchetto HTTP usa lo schema `3.0`: `context`, `sources` e `template`.
-Le note sono presenti una sola volta; non esiste un piano di fonti per sezione.
-I controlli del pacchetto sono in `discharge/models.py`. Backend e applicazione
-vanno aggiornati insieme; non servono migrazioni del database o nuove importazioni.
-
-Il JSONL eCREAM locale contiene 4.047 ID distinti, attualmente un testo per ID.
-L'importatore supporta più testi dello stesso `note_id`, deduplica quelli identici
-ripetuti per annotazioni e tiene separati ID diversi. Il raggruppamento documentale
-non attribuisce identità di paziente o episodio.
-
-Il backend segue soltanto eCREAM → PostgreSQL → pacchetto. `backend/app.py`
-espone le API, `database.py` contiene configurazione e connessioni, `repository.py`
-legge e salva i pacchetti, `importer.py` importa eCREAM e `cli.py` espone i tre
-comandi `init`, `import-ecream` e `serve`. Il simulatore clinico e le API FHIR
-sono stati rimossi. Le due tabelle documentali e i pacchetti `3.0` restano
-compatibili con i dati già importati; non serve reimportarli.
-
-```bash
-uv run --locked --extra backend --no-editable pytest
+CLINICAL_TEST_POSTGRES_URL=postgresql://clinico:clinico_sintetico@127.0.0.1:5433/clinico \
+  uv run --locked --extra backend --no-editable pytest -q
 uv run --locked --extra backend --no-editable ruff check .
-uv run --locked --extra backend --no-editable ruff format --check .
 ```
-
-I test SSE usano un endpoint simulato. I test PostgreSQL richiedono
-`CLINICAL_TEST_POSTGRES_URL` e usano schemi temporanei isolati.
-Le chiavi di cache uv includono sorgenti e template per aggiornare il pacchetto
-anche con `--no-editable`. Le immagini usano `uv.lock` e un utente senza privilegi.
-
-La [guida del backend](docs/backend.md) documenta importazione e API.
-Il [contratto dei dati](docs/dataset.md) descrive raggruppamento e importazione eCREAM.

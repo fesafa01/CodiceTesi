@@ -32,7 +32,7 @@ class PacketClient:
                 packet = CompositionPacket.model_validate_json(reply.read())
         except HTTPError as exc:
             raise ValueError(
-                f"Backend HTTP {exc.code}: verificare contesto e importazione con import-ecream."
+                f"Backend HTTP {exc.code}: verificare contesto e importazione con import-synthea."
             ) from None
         except URLError:
             raise ValueError("Backend non raggiungibile: verificare APP_BACKEND_URL.") from None

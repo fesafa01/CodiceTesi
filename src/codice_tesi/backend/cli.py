@@ -1,4 +1,4 @@
-"""Avvio del servizio e importazione esplicita delle note eCREAM."""
+"""Avvio del servizio e importazione esplicita dei dati clinici."""
 
 import argparse
 import asyncio
@@ -10,16 +10,21 @@ from psycopg_pool import PoolTimeout
 from pydantic import ValidationError
 
 from codice_tesi.backend.database import BackendSettings, Database, initialize_database
-from codice_tesi.backend.importer import import_ecream
+from codice_tesi.backend.synthea import import_synthea
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Backend documentale eCREAM della tesi.")
+    parser = argparse.ArgumentParser(description="Backend documentale clinico della tesi.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Crea le tabelle senza importare dati.")
     commands.add_parser("serve", help="Avvia l'API dei pacchetti di compilazione.")
-    ecream = commands.add_parser("import-ecream", help="Importa contesti e fonti da notes.jsonl.")
-    ecream.add_argument("path", type=Path, help="Percorso esplicito al file notes.jsonl.")
+    synthea = commands.add_parser(
+        "import-synthea", help="Importa i ricoveri FHIR Synthea indicizzati."
+    )
+    synthea.add_argument("path", type=Path, help="Cartella con indice.json e FHIR originali.")
+    synthea.add_argument(
+        "--replace", action="store_true", help="Sostituisce i contesti attivi del DB con Synthea."
+    )
     args = parser.parse_args(argv)
     try:
         settings = BackendSettings()
@@ -56,6 +61,6 @@ async def run_command(settings, args):
         if args.command == "init":
             await initialize_database(database)
             print("Schema inizializzato. Nessun dataset importato.")
-        else:
-            changed, count = await import_ecream(database, args.path)
-            print(f"eCREAM: {count} contesti. " + ("Importati." if changed else "Già presenti."))
+        elif args.command == "import-synthea":
+            changed, count = await import_synthea(database, args.path, replace=args.replace)
+            print(f"Synthea: {count} ricoveri. " + ("Importati." if changed else "Già presenti."))

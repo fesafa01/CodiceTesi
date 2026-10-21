@@ -1,7 +1,6 @@
 """Schema documentale, transazioni atomiche e letture PostgreSQL."""
 
 import asyncio
-import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,8 +9,8 @@ from psycopg.errors import ReadOnlySqlTransaction, UniqueViolation
 from codice_tesi.backend.app import create_app
 from codice_tesi.backend.cli import main
 from codice_tesi.backend.database import Database, initialize_database
-from codice_tesi.backend.importer import import_ecream, load_ecream
 from codice_tesi.backend.repository import read_packet, save_dataset
+from codice_tesi.backend.synthea import import_synthea, load_synthea
 
 
 def test_init_is_idempotent_and_creates_only_document_tables(empty_settings, monkeypatch, capsys):
@@ -37,16 +36,15 @@ def test_init_is_idempotent_and_creates_only_document_tables(empty_settings, mon
     asyncio.run(verify())
 
 
-def test_reinitialization_preserves_imported_data(empty_settings, tmp_path):
-    path = tmp_path / "notes.jsonl"
-    path.write_text(json.dumps(dict(note_id=1, text="---ANAMNESIS---\nNota")))
+def test_reinitialization_preserves_imported_data(empty_settings, fhir):
+    path = fhir()
 
     async def verify():
         async with Database(empty_settings) as db:
-            await import_ecream(db, path)
-            before = await read_packet(db, context_id="ecream-note-1")
+            await import_synthea(db, path)
+            before = await read_packet(db, context_id="synthea-caso-01")
             await initialize_database(db)
-            assert await read_packet(db, context_id="ecream-note-1") == before
+            assert await read_packet(db, context_id="synthea-caso-01") == before
             with pytest.raises(ReadOnlySqlTransaction):
                 async with db.connection(read_only=True) as connection:
                     await connection.execute("DELETE FROM composition_sources")
@@ -54,15 +52,14 @@ def test_reinitialization_preserves_imported_data(empty_settings, tmp_path):
     asyncio.run(verify())
 
 
-def test_failed_source_insert_rolls_back_new_context(empty_settings, tmp_path):
-    path = tmp_path / "notes.jsonl"
-    path.write_text(json.dumps(dict(note_id=1, text="---ANAMNESIS---\nNota")))
-    _, loaded = load_ecream(path)
+def test_failed_source_insert_rolls_back_new_context(empty_settings, fhir):
+    path = fhir()
+    _, loaded = load_synthea(path)
     context, source = loaded[0]
 
     async def verify():
         async with Database(empty_settings) as db:
-            await import_ecream(db, path)
+            await import_synthea(db, path)
             other = context.model_copy(update={"id": "other", "dataset": "other"})
             duplicate = source.model_copy(update={"context_id": other.id})
             with pytest.raises(UniqueViolation):

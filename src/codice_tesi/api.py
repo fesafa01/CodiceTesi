@@ -2,10 +2,10 @@
 
 GET /v1/models: elenco dei modelli con client.models.list().
 POST /v1/chat/completions: generazione tramite l'adattatore OpenAIChatModel.
-PydanticAI invia una sola richiesta in streaming con tutte le note e i campi Campus.
+PydanticAI invia una sola richiesta per la stesura, con reasoning opzionale.
 """
 
-from openai import AsyncOpenAI, Timeout
+from openai import AsyncOpenAI
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -14,11 +14,11 @@ from codice_tesi.config import ModelConfig, Settings
 
 
 def create_client(settings: Settings, *, streaming: bool = False) -> AsyncOpenAI:
-    """Lo stream non ha un timeout di lettura; connessione e richieste ordinarie sì."""
+    """Anche lo stream scade se il server non invia dati per settings.timeout secondi."""
     return AsyncOpenAI(
         base_url=str(settings.base_url),
         api_key=settings.api_key.get_secret_value(),
-        timeout=Timeout(settings.timeout, read=None) if streaming else settings.timeout,
+        timeout=settings.timeout,
         max_retries=0,
     )
 

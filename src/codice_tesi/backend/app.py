@@ -1,4 +1,4 @@
-"""API di lettura: eCREAM → database → pacchetto della lettera."""
+"""API di lettura: dati clinici → database → pacchetto della lettera."""
 
 import json
 import logging
@@ -66,7 +66,7 @@ def create_app(settings: BackendSettings | None = None) -> FastAPI:
             yield
 
     app = FastAPI(
-        title="Backend documentale eCREAM",
+        title="Backend documentale clinico",
         version="0.3.0",
         lifespan=lifespan,
         description="Contesti e fonti per la compilazione della lettera di dimissione.",

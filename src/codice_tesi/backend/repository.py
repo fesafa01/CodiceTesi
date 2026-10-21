@@ -18,10 +18,14 @@ class BackendError(Exception):
 
 
 async def save_dataset(
-    database: Database, contexts: list[Context], sources: list[EvidenceSource]
+    database: Database,
+    contexts: list[Context],
+    sources: list[EvidenceSource],
+    *,
+    replace: bool = False,
 ) -> tuple[bool, int]:
     """Importa contesti e fonti della stessa versione in una transazione. Il lock serializza
-    import concorrenti; un dataset differente non sovrascrive quello già presente."""
+    import concorrenti; replace sostituisce esplicitamente tutti i contesti attivi."""
     if not contexts:
         raise ValueError("Nessun contesto da importare.")
     context_ids = {context.id for context in contexts}
@@ -34,8 +38,11 @@ async def save_dataset(
         raise ValueError("Fonte senza contesto nell'importazione.")
     dataset_id, digest = datasets.pop()
     async with database.connection() as connection:
-        # Serializza import concorrenti; non aggiorna o sostituisce contesti esistenti.
+        # Il lock copre anche l'eventuale sostituzione atomica del dataset.
         await connection.execute("SELECT pg_advisory_xact_lock(183627411)")
+        if replace:
+            await connection.execute("DELETE FROM composition_sources")
+            await connection.execute("DELETE FROM composition_contexts")
         cursor = await connection.execute(
             "SELECT DISTINCT payload->>'dataset_version' AS version FROM composition_contexts "
             "WHERE payload->>'dataset' = %s",

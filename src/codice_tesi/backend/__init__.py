@@ -1,1 +1,1 @@
-"""Backend documentale eCREAM indipendente dall’inferenza del modello."""
+"""Backend dei ricoveri Synthea indipendente dall’inferenza del modello."""

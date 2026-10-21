@@ -1,4 +1,4 @@
--- Contesti e fonti eCREAM. init preserva le tabelle e i dati già presenti.
+-- Contesti e fonti documentali. init preserva le tabelle e i dati già presenti.
 CREATE TABLE IF NOT EXISTS composition_contexts (
     id text PRIMARY KEY,
     payload jsonb NOT NULL,

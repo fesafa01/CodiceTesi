@@ -1,13 +1,9 @@
-"""Pacchetto unico, isolamento delle note e adapter eCREAM."""
-
-import json
+"""Pacchetto unico, identità del ricovero e isolamento delle fonti."""
 
 import pytest
 from pydantic import ValidationError
 
-from codice_tesi.backend.importer import load_ecream
 from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
-from codice_tesi.discharge.template import load_template
 
 
 def test_packet_contains_one_source_list_and_one_template(packet_factory):
@@ -63,51 +59,3 @@ def test_source_hash_is_checked(packet_factory):
     data = packet_factory("anamnesi").sources[0].model_dump()
     with pytest.raises(ValidationError, match="Hash"):
         EvidenceSource.model_validate(dict(data, text="Testo modificato"))
-
-
-def test_ecream_never_infers_patient_episode_or_uses_crf_annotations(tmp_path):
-    path = tmp_path / "notes.jsonl"
-    rows = [
-        dict(
-            note_id=i,
-            split="test",
-            text=f"---ANAMNESIS---\nNota {i}",
-            annotations=[{"label_assigned": "DO_NOT_USE"}],
-        )
-        for i in (11, 12)
-    ]
-    path.write_text("\n".join(map(json.dumps, rows)))
-    digest, loaded = load_ecream(path)
-    assert len(loaded) == 2 and len(digest) == 64
-    assert loaded[0][0].id != loaded[1][0].id
-    assert all(context.patient_id is None and context.episode_id is None for context, _ in loaded)
-    assert "DO_NOT_USE" not in loaded[0][1].model_dump_json()
-    path.write_text("\n".join(map(json.dumps, rows + rows[:1])))
-    _, repeated = load_ecream(path)
-    assert len(repeated) == 2  # stesse note, annotazioni ripetute: nessun testo duplicato
-
-
-def test_repeated_note_id_groups_distinct_notes_without_combining_other_ids(tmp_path):
-    rows = [
-        dict(note_id=11, text="---TRIAGE---\nTesto A", split="test"),
-        dict(note_id=11, text="---ANAMNESIS---\nTesto B", split="test"),
-        dict(note_id=12, text="---TRIAGE---\nTesto C", split="test"),
-        dict(
-            note_id=11, text="---TRIAGE---\nTesto A", split="test", annotations=[{"ignored": True}]
-        ),
-    ]
-    path = tmp_path / "notes.jsonl"
-    path.write_text("\n".join(map(json.dumps, rows)))
-    _, loaded = load_ecream(path)
-    grouped = [(c, s) for c, s in loaded if c.id == "ecream-note-11"]
-    assert len(loaded) == 3 and len(grouped) == 2
-    assert len({s.id for _, s in loaded}) == 3
-    assert all(
-        c.scope == "gruppo_note" and c.patient_id is None and c.episode_id is None
-        for c, _ in grouped
-    )
-    packet = CompositionPacket(
-        context=grouped[0][0], sources=tuple(s for _, s in grouped), template=load_template()
-    )
-    assert len(packet.sources) == 2
-    assert all("Testo C" not in s.text for s in packet.sources)

@@ -7,11 +7,13 @@ from pathlib import Path
 import httpx2 as httpx
 import pytest
 from openai import AsyncOpenAI
+from pydantic_ai.exceptions import ModelAPIError
 
 from codice_tesi import api, application
 from codice_tesi.config import ModelConfig, Settings
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
+from codice_tesi.discharge.generator import LLMDraftGenerator
 
 
 def sse(text, finish=None):
@@ -25,11 +27,13 @@ def sse(text, finish=None):
     return f"data: {json.dumps(event)}\n\n".encode()
 
 
+@pytest.mark.parametrize("thinking", [False, True])
 def test_single_http_call_streams_before_completion_and_flushes_same_file(
-    packet_factory, tmp_path, monkeypatch, capsys
+    packet_factory, tmp_path, monkeypatch, capsys, thinking
 ):
     packet = packet_factory("triage", "anamnesi")
     calls = []
+    hidden = "Controllo interno sintetico."
     letter = "BOZZA DI LETTERA DI DIMISSIONE - DA REVISIONARE\n" + "\n".join(
         f"{index}. {field.title}\nTesto di fixture.\n"
         for index, field in enumerate(packet.template.sections, 1)
@@ -43,6 +47,10 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
 
         class Stream(httpx.AsyncByteStream):
             async def __aiter__(self):
+                if thinking:
+                    event = json.loads(sse("").decode().removeprefix("data: "))
+                    event["choices"][0]["delta"] = {"reasoning_content": hidden}
+                    yield f"data: {json.dumps(event)}\n\n".encode()
                 yield sse(letter[:30])
                 await release.wait()
                 yield sse(letter[30:], "stop")
@@ -55,6 +63,11 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
             assert body["stream"] is True and not body.get("tools")
             assert body.get("tool_choice") in (None, "none")
             assert body["top_k"] == 20 and body["max_tokens"] == 8192
+            assert body["thinking"] == {"type": "enabled" if thinking else "disabled"}
+            if thinking:
+                assert body["reasoning_effort"] == "low"
+            else:
+                assert "reasoning_effort" not in body
             assert [m["role"] for m in body["messages"]] == ["system", "user"]
             for i, field in enumerate(packet.template.sections, 1):
                 assert f"{i}. {field.title}\n" in body["messages"][0]["content"]
@@ -78,7 +91,7 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
             application.run_application(
                 backend_url="http://test",
                 output_dir=tmp_path,
-                config=ModelConfig(top_k=20),
+                config=ModelConfig(top_k=20, max_tokens=8192, thinking=thinking),
             )
         )
         try:
@@ -102,22 +115,187 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
         report = json.loads((directory / "esito.json").read_text())
         assert report["richieste_llm_avviate"] == 1 and len(report["campi_previsti"]) == 17
         assert report["stato"] == "bozza_da_revisionare"
+        assert report["richieste_llm_previste"] == 1
+        assert report["config_modello"]["thinking"] is thinking
+        assert report["consumo"]["stream"]["caratteri_ragionamento"] == (
+            len(hidden) if thinking else 0
+        )
+        assert hidden not in "\n".join(p.read_text() for p in directory.iterdir())
+        assert {p.name for p in directory.iterdir()} == {"richiesta.txt", "bozza.txt", "esito.json"}
 
     monkeypatch.setattr(application.PacketClient, "fetch", fetch)
     asyncio.run(check())
     assert len(calls) == 1
 
 
-def test_stream_timeout_has_no_read_deadline_but_keeps_connection_timeout():
+def test_stream_has_finite_idle_timeout_without_retries():
     async def check():
         settings = Settings(timeout=15, _env_file=None)
         async with api.create_client(settings, streaming=True) as client:
-            assert client.timeout.read is None and client.timeout.connect == 15
+            assert client.timeout == 15
             assert client.max_retries == 0
         async with api.create_client(settings) as client:
             assert client.timeout == 15
 
     asyncio.run(check())
+
+
+@pytest.mark.parametrize("first_part", ["thinking", "whitespace", "text"])
+def test_first_text_deadline_limits_reasoning_but_not_running_letter(packet_factory, first_part):
+    async def check():
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                if first_part == "thinking":
+                    event = json.loads(sse("").decode().removeprefix("data: "))
+                    event["choices"][0]["delta"] = {"reasoning_content": "Controllo"}
+                    yield f"data: {json.dumps(event)}\n\n".encode()
+                else:
+                    yield sse("Testo" if first_part == "text" else " \n")
+                await asyncio.sleep(0.12)
+                yield sse(" finale.", "stop")
+                yield b"data: [DONE]\n\n"
+
+        def handler(request):
+            return httpx.Response(
+                200, headers={"Content-Type": "text/event-stream"}, stream=Stream()
+            )
+
+        async with AsyncOpenAI(
+            base_url="http://test/v1",
+            api_key="test",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        ) as client:
+            generator = LLMDraftGenerator(ModelConfig(first_text_timeout=0.06), client)
+            request = prepare_request(packet_factory("diario"), ContextConfig(), output_tokens=100)
+
+            async def consume():
+                return "".join([chunk async for chunk in generator.stream(request)])
+
+            if first_part == "text":
+                assert await consume() == "Testo finale."
+            else:
+                with pytest.raises(ValueError, match="Limite di attesa"):
+                    await consume()
+                assert "primo_testo_secondi" not in generator.usage["stream"]
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize("finish", ["stop", "length", "cancel"])
+def test_thinking_is_counted_before_text_and_usage_survives_token_limit(packet_factory, finish):
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+    hidden = "Ragionamento sintetico riservato al test."
+    request = prepare_request(packet_factory("triage"), ContextConfig(), output_tokens=64)
+
+    async def check():
+        release = asyncio.Event()
+        calls = []
+
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                event = json.loads(sse("").decode().removeprefix("data: "))
+                event["choices"][0]["delta"] = {"reasoning_content": hidden}
+                yield f"data: {json.dumps(event)}\n\n".encode()
+                await release.wait()
+                yield sse("Lettera." if finish == "stop" else "", finish)
+                yield (
+                    b'data: {"choices": [], "usage": {"prompt_tokens": 100, '
+                    b'"completion_tokens": 64, "total_tokens": 164}}\n\n'
+                )
+                yield b"data: [DONE]\n\n"
+
+        def handler(http_request):
+            calls.append(json.loads(http_request.content))
+            assert calls[0]["thinking"] == {"type": "enabled"}
+            assert calls[0]["reasoning_effort"] == "low"
+            return httpx.Response(
+                200, headers={"Content-Type": "text/event-stream"}, stream=Stream()
+            )
+
+        async with AsyncOpenAI(
+            base_url="http://test/v1",
+            api_key="test",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        ) as client:
+            generator = LLMDraftGenerator(ModelConfig(thinking=True, max_tokens=64), client)
+            chunks = []
+
+            async def consume():
+                async for chunk in generator.stream(request):
+                    chunks.append(chunk)
+
+            task = asyncio.create_task(consume())
+            try:
+                async with asyncio.timeout(2):
+                    while generator.progress.get("caratteri_ragionamento", 0) == 0:
+                        await asyncio.sleep(0.01)
+                assert generator.progress["fase"] == "ragionamento"
+                assert generator.progress["caratteri_ragionamento"] == len(hidden)
+                assert not chunks and not task.done()
+                if finish == "cancel":
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+                    assert not chunks
+                elif finish == "length":
+                    release.set()
+                    with pytest.raises(UnexpectedModelBehavior, match="token limit"):
+                        await asyncio.wait_for(task, 2)
+                    assert not chunks
+                else:
+                    release.set()
+                    await asyncio.wait_for(task, 2)
+                    assert "".join(chunks) == "Lettera."
+                    assert "primo_testo_secondi" in generator.progress
+                if finish != "cancel":
+                    assert generator.usage["input_tokens"] == 100
+                    assert generator.usage["output_tokens"] == 64
+                    assert generator.usage["finish_reason"] == finish
+                assert generator.usage["stream"]["caratteri_ragionamento"] == len(hidden)
+                assert hidden not in json.dumps(generator.usage)
+                assert len(calls) == 1
+            finally:
+                if not task.done():
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+
+    asyncio.run(check())
+
+
+def test_timeout_before_first_text_preserves_failure_without_retry(
+    packet_factory, tmp_path, monkeypatch
+):
+    calls = []
+
+    async def fetch(self, **kwargs):
+        return packet_factory("triage")
+
+    def handler(request):
+        calls.append(request)
+        raise httpx.ReadTimeout("No stream data", request=request)
+
+    def create_client(settings, *, streaming=False):
+        return AsyncOpenAI(
+            base_url="http://test/v1",
+            api_key="test",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+
+    monkeypatch.setattr(application.PacketClient, "fetch", fetch)
+    monkeypatch.setattr(api, "create_client", create_client)
+    with pytest.raises(ModelAPIError, match="timed out"):
+        asyncio.run(application.run_application(backend_url="http://test", output_dir=tmp_path))
+    directory = next(tmp_path.rglob("bozza.parziale.txt")).parent
+    report = json.loads((directory / "esito.json").read_text())
+    assert len(calls) == 1 and report["stato"] == "fallito"
+    assert report["errore_tipo"] == "ModelAPIError"
+    assert report["consumo"]["stream"]["caratteri_testo"] == 0
+    assert not (directory / "bozza.txt").exists()
 
 
 @pytest.mark.parametrize("finish", ["stop", "length"])
