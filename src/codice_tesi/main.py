@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -27,6 +28,18 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Attiva o disattiva il reasoning nella stessa richiesta che produce la bozza.",
     )
+    discharge.add_argument("--model", help="ID del modello richiesto al server configurato.")
+    discharge.add_argument(
+        "--experiment-file",
+        type=Path,
+        help="JSON dei metadati dichiarati: esperimento, checkpoint, hardware e ripetizione.",
+    )
+    discharge.add_argument(
+        "--telemetry",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Abilita/disabilita OTLP; configurazione in .env.observability o TELEMETRY_*.",
+    )
     discharge.add_argument(
         "--dry-run",
         action="store_true",
@@ -50,6 +63,10 @@ def main(argv: list[str] | None = None) -> None:
         help="URL del backend clinico; default APP_BACKEND_URL o http://127.0.0.1:8001.",
     )
     commands.add_parser("modelli", help="Elenca i modelli del server LLM.")
+    registry = commands.add_parser("registro", help="Esporta il registro in CSV o JSONL.")
+    registry.add_argument("--output-dir", type=Path, default=Path("output/dimissioni"))
+    registry.add_argument("--format", choices=("csv", "jsonl"), default="csv")
+    registry.add_argument("--destination", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command is None:
         args = parser.parse_args(["dimissione"])
@@ -64,13 +81,31 @@ def main(argv: list[str] | None = None) -> None:
     from codice_tesi.config import ModelConfig, Settings
 
     try:
+        if args.command == "registro":
+            from codice_tesi.execution import export_registry
+
+            count = export_registry(args.output_dir, args.destination, format=args.format)
+            print(f"Esportate {count} esecuzioni: {args.destination}")
+            return
         if args.command == "dimissione":
             from codice_tesi.application import run_application
             from codice_tesi.discharge.config import ContextConfig
+            from codice_tesi.execution import ExperimentConfig
+            from codice_tesi.observability import TelemetryConfig
 
             config = ModelConfig()
             if args.thinking is not None:
                 config.thinking = args.thinking
+            if args.model is not None:
+                config.model = args.model
+            experiment = (
+                ExperimentConfig.model_validate(json.loads(args.experiment_file.read_text()))
+                if args.experiment_file
+                else None
+            )
+            telemetry_config = TelemetryConfig()
+            if args.telemetry is not None:
+                telemetry_config.enabled = args.telemetry
             asyncio.run(
                 run_application(
                     backend_url=args.backend_url,
@@ -80,6 +115,8 @@ def main(argv: list[str] | None = None) -> None:
                     dry_run=args.dry_run,
                     config=config,
                     context_config=ContextConfig(window_tokens=args.context_window),
+                    experiment=experiment,
+                    telemetry_config=telemetry_config,
                 )
             )
             return

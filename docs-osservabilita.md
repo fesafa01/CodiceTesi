@@ -1,0 +1,288 @@
+# Registro sperimentale e osservabilità locale
+
+Il registro JSON per esecuzione è il riferimento per l'analisi della tesi. Phoenix
+visualizza le tracce e le singole chiamate LLM; Prometheus conserva gli istogrammi
+e i contatori aggregati. Un valore assente resta `null`: non viene sostituito con
+zero, né ricavato dal numero di caratteri o chunk.
+
+## Architettura
+
+```mermaid
+flowchart LR
+    APP[Applicazione CLI] --> REG[Registro JSON atomico e artefatti locali]
+    APP -->|OTLP HTTP| COL[OpenTelemetry Collector]
+    COL -->|Tracce con coda persistente| PX[Phoenix]
+    PX --> PDB[(PostgreSQL dedicato)]
+    COL -->|Metriche aggregate| EXP[Endpoint Prometheus interno]
+    PROM[Prometheus] -->|scrape ogni 5 s| EXP
+```
+
+Servizi separati in `compose.yaml`: `phoenix`, `phoenix-db`, `otel-collector`,
+`prometheus`. `otel-storage-init` è un servizio iniziale che prepara i permessi del
+volume e termina; il Collector viene eseguito con l'utente non privilegiato della
+sua immagine. Il database Phoenix è separato dal database dei ricoveri.
+
+| Interfaccia | Indirizzo host | Uso |
+|---|---|---|
+| Phoenix | <http://127.0.0.1:6006> | Progetto `tesi-dimissioni`, trace, span LLM e metadati |
+| Prometheus | <http://127.0.0.1:9090> | Query e grafici delle metriche aggregate |
+| Ricezione OTLP | `http://127.0.0.1:4318` | `/v1/traces` e `/v1/metrics` per processi sul Mac |
+
+Solo queste porte sono pubblicate e soltanto sul loopback. Database Phoenix,
+endpoint di scrape e gRPC non sono pubblicati. La rete Docker dedicata isola i
+servizi di osservabilità dagli altri servizi, salvo il Collector che riceve anche
+dalla rete applicativa. Questa configurazione locale usa Phoenix senza login;
+non è una configurazione da esporre su una rete condivisa.
+
+Le immagini hanno versioni fissate; PostgreSQL Phoenix usa anche un digest.
+`uv.lock` fissa le dipendenze Python. Phoenix ha disabilitati telemetria web e
+caricamento autonomo di risorse esterne. Questo non equivale a una verifica di
+funzionamento air-gapped dell'intero sistema.
+
+## Avvio e uso
+
+Dalla cartella `CodiceTesi`:
+
+```bash
+docker compose up -d --wait phoenix-db phoenix otel-collector prometheus
+docker compose build app
+
+# Backend e dataset già inizializzati:
+docker compose run --rm app dimissione --contesto synthea-caso-02 --thinking \
+  --experiment-file /app/experiments/exploratory.example.json
+```
+
+La cartella `experiments/` è montata in sola lettura nel container. Creare un JSON
+per la condizione sperimentale e aggiornare `repetition` a ogni ripetizione.
+`--model` cambia l'ID richiesto al server; i parametri e i flag di reasoning del
+modello vanno verificati per ogni famiglia, senza supporre che siano portabili.
+
+Per l'esecuzione Python sul Mac:
+
+```bash
+# Eseguito già durante l'integrazione; non sovrascrivere una configurazione personale.
+cp -n .env.observability.example .env.observability
+uv sync --locked --extra backend --no-editable
+uv run --locked --no-editable python main.py dimissione \
+  --contesto synthea-caso-02 --thinking \
+  --experiment-file experiments/exploratory.example.json
+```
+
+Il file `.env.observability` è separato da `.env`, destinato alla connessione LLM.
+Variabili: `TELEMETRY_ENABLED`, `TELEMETRY_ENDPOINT`, `TELEMETRY_PROJECT`,
+`TELEMETRY_EXPORT_TIMEOUT_SECONDS`. Nel container l'endpoint è
+`http://otel-collector:4318`; sul Mac è `http://127.0.0.1:4318`.
+`--no-telemetry` disabilita gli export; il registro locale resta attivo.
+
+Le generazioni continuano a richiedere backend, dataset e Spark raggiungibili.
+L'elenco dei modelli è verificabile senza inferenza con `python main.py modelli`.
+Se i servizi sono già avviati, `docker compose run --rm --no-deps app ...` permette
+anche di eseguire il client quando lo stack di osservabilità non è disponibile.
+Gli errori di esportazione non devono trasformare una generazione riuscita in un
+fallimento. Un Collector non raggiungibile può comunque perdere dati prima della
+ricezione: il registro rimane il riferimento e non viene ricreato dalla dashboard.
+
+## Registro e riproducibilità
+
+Ogni invocazione del workflow, compresi `--dry-run`, fallimenti di lettura o
+preparazione, errori del modello e cancellazioni, crea:
+
+```
+output/dimissioni/registro/<run_id>.json
+```
+
+Quando il pacchetto è disponibile, il record rimanda anche alla cartella originale
+`<contesto>/<esecuzione>/`, con `richiesta.txt`, bozza o parziale ed `esito.json`.
+Quest'ultimo mantiene i campi esistenti e aggiunge `run_id` e `trace_id`.
+
+Il record contiene:
+
+- schema del registro, UUID, timestamp UTC, stato ed eventuale tipo di errore;
+- esperimento, condizione e ripetizione, distinti dal seed di selezione del caso;
+- modello richiesto e modello riportato dalla risposta;
+- configurazione richiesta, hash del codice installato, versioni dei pacchetti;
+- hash del pacchetto completo e della richiesta, versioni di dataset, prompt e
+  template, quantità di fonti, configurazione del contesto e hash della bozza;
+- tempi delle fasi e misure dello stream, consumi disponibili e qualità dei contatori;
+- identificativi della trace, percorso degli artefatti e risultato del flush SDK.
+
+Checkpoint, tokenizer, quantizzazione, runtime, hardware di inferenza, cache,
+concorrenza e split del dataset sono **dichiarati dall'operatore** nel JSON
+esperimento. Un campo non verificato va lasciato `null`/`unknown`. Il sistema non
+attribuisce allo Spark le caratteristiche del Mac o del container client.
+`source_sha256` identifica i sorgenti e i template installati, non un commit Git.
+Nell’installazione il manifest segue i file dichiarati nel pacchetto distribuito,
+escludendo eventuali copie residue non appartenenti alla distribuzione.
+La stima prudenziale di input usata dal controllo del contesto è registrata come
+stima in byte UTF-8 con margine; non è il numero di token del tokenizer del modello.
+
+Scrittura atomica per ogni record e nessun file CSV condiviso in append: processi
+concorrenti scrivono UUID distinti. Il checkpoint ogni 15 secondi aggiorna lo stato
+in corso. Dopo SIGKILL o perdita di alimentazione un record può restare
+`preparing`/`running`; non deve essere interpretato come esecuzione completata.
+Le durate usano un orologio monotono, i timestamp UTC servono alla correlazione.
+
+```bash
+uv run --locked --no-editable python main.py registro --format csv \
+  --destination output/metriche/esecuzioni.csv
+uv run --locked --no-editable python main.py registro --format jsonl \
+  --destination output/metriche/esecuzioni.jsonl
+
+# Alternativa dal container, con output persistente sul Mac:
+docker compose run --rm --no-deps app registro --format csv \
+  --destination output/metriche/esecuzioni.csv
+```
+
+L'export legge soltanto il nuovo registro; non inventa metriche per le bozze
+storiche. JSONL conserva oggetti e `null`; CSV appiattisce i nomi con punti e rende
+`null` come cella vuota. L'export comprende anche errori, dry-run e tentativi ancora
+in corso: selezionare stati e modalità prima di calcolare statistiche scientifiche.
+
+## Definizioni delle misure
+
+| Campo `llm` del registro | Significato |
+|---|---|
+| `request_duration_seconds` | Durata della richiesta di modello fino alla chiusura dello stream, osservata dal client |
+| `time_to_first_chunk_seconds` | Primo chunk strutturato ricevuto dall'adattatore, anche se contiene soltanto il ruolo |
+| `time_to_first_content_seconds` | Primo contenuto di testo o reasoning, compreso whitespace |
+| `time_to_first_reasoning_seconds` | Primo reasoning non vuoto nei campi supportati |
+| `time_to_first_text_seconds` | Primo testo non vuoto della lettera |
+| `time_to_last_content_seconds` | Ultimo contenuto osservato, distinto dal chunk finale di usage |
+| `content_chunk_gap_mean_seconds` / `max` | Distanze tra chunk con contenuto; non latenza tra token |
+| `input_tokens` / `output_tokens` | Conteggi dello snapshot usage del server |
+| `reasoning_tokens` | Dettaglio esplicitamente riportato dal server; `null` se assente |
+| `visible_output_tokens` | Output meno reasoning, se entrambi disponibili e coerenti con il contratto Chat Completions |
+| `total_tokens` / `calculated_total_tokens` | Totale dichiarato e somma input/output, conservati separatamente |
+| `cached_input_tokens` | Conteggio riportato nei dettagli di input, se disponibile |
+| `output_tokens_per_request_second` | Output token / durata della richiesta client, per stream completati e usage coerente |
+| `server_reported_timings` | Solo campi numerici noti dell'oggetto `timings`, quando presente |
+| `server_decode_tokens_per_second` | `predicted_n / predicted_ms * 1000`, solo se questi campi sono riportati dal backend |
+| `server_ttft_seconds` | Attualmente `null`: il client non osserva il TTFT interno del motore |
+
+`usage_complete` richiede sia uno snapshot usage sia la conclusione dello stream;
+non indica che la bozza sia corretta o abbia superato la validazione. Una risposta
+troncata/interrotta conserva i contatori disponibili senza presentarli come totali
+completi. Gli snapshot usage cumulativi sostituiscono i precedenti: non si sommano.
+Il reasoning è un sottoinsieme dell'output nel contratto adottato e non si aggiunge
+nuovamente al totale. Un backend che segue un contratto diverso richiede un
+adattatore dedicato; le incongruenze rilevate sono in `usage_issues`.
+
+Queste misure comprendono effetti di rete e consumo dello stream da parte del
+client, inclusi flush del file e stampa. La velocità client non è la velocità pura
+di decode del motore. Coda, prefill, TTFT server, memoria GPU, potenza ed energia
+richiedono osservazioni del serving/hardware sullo Spark, attualmente non attestate.
+Token/s e budget di token vanno interpretati insieme a tokenizer, configurazione,
+lunghezza della risposta e qualità, senza equiparare tokenizer diversi.
+
+`timings.total_seconds` misura il workflow fino all'esito locale, escluso il flush
+finale della telemetria. Le fasi comprendono lettura/validazione del pacchetto,
+preparazione della richiesta, salvataggio iniziale, generazione e validazione/salvataggio
+della bozza. La fase di recupero misura il client del backend; non scompone SQL e
+rete nel server documentale. Il tempo di revisione medica non è misurato da questo stack.
+
+## Phoenix: che cosa guardare
+
+Aprire il progetto `tesi-dimissioni`. Ogni trace ha uno span radice
+`discharge.execution`, span delle fasi e uno span `LLM` della chiamata.
+`tesi.run_id` collega la trace al record locale. Nei metadati radice sono disponibili
+esperimento, configurazione e hash del codice; nello span LLM modello, contatori
+supportati, tempo al primo chunk e tempo al primo testo.
+
+Non sono presenti span automatici duplicati del framework: gli span sono espliciti
+OTel, con attributi GenAI e OpenInference per la lettura in Phoenix. I token sono
+attribuiti una volta sola allo span LLM. Nessun costo monetario viene calcolato per
+il modello locale. `flush_completed` certifica soltanto che il flush SDK ha
+terminato: non è una ricevuta di persistenza in Phoenix.
+
+Prompt, output, fonti, identificativi di paziente/episodio e reasoning non sono
+esportati. Per le eccezioni si esporta soltanto il tipo, senza messaggio o stack
+trace, che potrebbero includere dati clinici. La richiesta e la bozza rimangono
+negli artefatti locali già previsti: la gestione del loro accesso resta necessaria
+quando il dataset cambierà. La dashboard non offre il replay del prompt perché il
+contenuto non è stato caricato.
+
+## Prometheus e comandi brevi
+
+Il client esporta metriche con temporalità **delta**; il processore
+`deltatocumulative` del Collector accumula i valori tra processi CLI successivi.
+Senza questa conversione un istogramma cumulativo nuovo per ogni comando potrebbe
+sostituire quello precedente. Le etichette contengono progetto, modello, modalità thinking,
+stato e modalità dry-run; non contengono run ID, trace ID o identificativi clinici.
+Gli istogrammi hanno bucket espliciti adatti a secondi e quantità di token.
+
+Metriche principali:
+
+- `tesi.executions`: tentativi del workflow, compresi dry-run e fallimenti;
+- `tesi.execution.duration`: durata totale del workflow;
+- `tesi.stage.duration`: tempi per fase;
+- `gen_ai.client.operation.duration`: durata della richiesta LLM;
+- `gen_ai.client.operation.time_to_first_chunk`: attesa al primo chunk;
+- `tesi.llm.time_to_first_text`: attesa al primo testo della lettera;
+- `gen_ai.client.token.usage`: input/output riportati, senza doppio conteggio del reasoning;
+- `tesi.llm.reasoning_tokens`: dettaglio separato, da non sommare nuovamente all'output;
+- `tesi.llm.output_tokens_per_request_second`: distribuzione della velocità client per richiesta.
+
+I conteggi token entrano negli aggregati solo quando lo stream è concluso, usage è
+disponibile e i contatori sono coerenti; i record conservano anche le misure parziali.
+Phoenix riceve **tracce**, Prometheus **metriche**: gli istogrammi non vengono inviati
+a Phoenix come se fosse un database di metriche.
+
+La conversione dei nomi OTel per Prometheus aggiunge unità/suffissi e normalizza i
+punti in underscore. Usare il selettore metriche dell'interfaccia per confermare i
+nomi esposti. Il registro JSON resta la fonte per confronti esatti tra casi e
+configurazioni; gli istogrammi sono strumenti di monitoraggio, non sostituiscono i
+dati individuali dell'esperimento.
+
+Esempi di query sui nomi verificati nello stack locale:
+
+```promql
+# Esecuzioni completate con inferenza, escludendo dry-run
+sum(tesi_executions_total{tesi_status="completed",tesi_dry_run="false"})
+
+# Token di output riportati nelle richieste complete
+sum(gen_ai_client_token_usage_sum{gen_ai_token_type="output",tesi_dry_run="false"})
+
+# Latenza media delle richieste del segmento corrente del Collector
+sum(gen_ai_client_operation_duration_seconds_sum{tesi_status="completed"})
+/
+sum(gen_ai_client_operation_duration_seconds_count{tesi_status="completed"})
+```
+
+Per confronti controllati usare il registro e filtrare anche hash del codice,
+versione del dataset e condizione. Un istogramma di monitoraggio può aggregare
+esecuzioni con configurazioni diverse e non sostituisce il campione sperimentale.
+
+## Persistenza, arresto e verifica
+
+I volumi `phoenix-db`, `otel-queue` e `prometheus-data` conservano rispettivamente
+tracce, coda di esportazione e serie temporali. Prometheus conserva 90 giorni.
+La coda trace ritenta senza scadenza temporale ma ha capacità finita: non garantisce
+assenza di perdite se il disco è pieno o il Collector non riceve i dati.
+L'accumulazione delta delle metriche è in memoria nel Collector: un suo riavvio
+azzera questa accumulazione; Prometheus conserva i campioni precedenti e deve
+trattare il nuovo segmento come un reset. Le serie inattive scadono dopo 72 ore.
+
+```bash
+docker compose ps
+docker compose logs --tail 40 otel-collector phoenix
+docker compose run --rm --no-deps otel-collector validate \
+  --config=/etc/otelcol/config.yaml
+
+# Arresto del solo stack, senza cancellazione dei volumi:
+docker compose stop prometheus otel-collector phoenix phoenix-db
+```
+
+Non usare `down -v` per un normale arresto. Per le prove automatiche:
+
+```bash
+TELEMETRY_ENABLED=false CLINICAL_TEST_POSTGRES_URL=postgresql://clinico:clinico_sintetico@127.0.0.1:5433/clinico \
+  uv run --locked --extra backend --no-editable pytest -q
+uv run --locked --extra backend --no-editable ruff check .
+```
+
+Riferimenti tecnici consultati il 23 ottobre 2026:
+[Phoenix](https://arize.com/docs/phoenix/self-hosting/deploying-phoenix),
+[OpenTelemetry Collector: resilienza](https://opentelemetry.io/docs/collector/resiliency/),
+[convenzioni GenAI](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/model/gen-ai/metrics.yaml).
+Le convenzioni GenAI sono ancora in evoluzione; il registro ha uno schema proprio
+versionato e non dipende dall'organizzazione interna del database Phoenix.

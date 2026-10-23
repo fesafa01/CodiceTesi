@@ -26,6 +26,37 @@ Il prompt è in `src/codice_tesi/discharge/prompts.py`; i campi canonici sono in
 Ctrl+C o un errore conservano il parziale. Il reasoning interno non viene salvato.
 La bozza richiede revisione medica.
 
+Il registro versionato in `output/dimissioni/registro/<run_id>.json` raccoglie anche
+dry-run, fallimenti prima dell'inferenza e interruzioni. Include tempi per fase,
+primo chunk/primo testo, token disponibili, hash e configurazione sperimentale.
+I contatori non esposti dal server restano `null`.
+
+Lo stack locale usa container separati per Phoenix, PostgreSQL dedicato,
+OpenTelemetry Collector e Prometheus:
+
+```bash
+docker compose up -d --wait phoenix-db phoenix otel-collector prometheus
+docker compose build app
+docker compose run --rm app dimissione --contesto synthea-caso-02 --thinking \
+  --experiment-file /app/experiments/exploratory.example.json
+```
+
+[Phoenix](http://127.0.0.1:6006) visualizza le tracce;
+[Prometheus](http://127.0.0.1:9090) conserva le metriche aggregate.
+Per l'esecuzione Python sul Mac, copiare `.env.observability.example` in
+`.env.observability` senza sovrascrivere configurazioni esistenti.
+Il client Docker è già configurato per esportare al Collector.
+`--no-telemetry` disabilita l'export, mantenendo il registro locale.
+Prompt, testi clinici e reasoning non vengono esportati nelle tracce.
+
+```bash
+uv run --locked --no-editable python main.py registro --format csv \
+  --destination output/metriche/esecuzioni.csv
+```
+
+Architettura, definizioni delle misure, metadati sperimentali, persistenza e limiti
+sono in [docs-osservabilita.md](docs-osservabilita.md).
+
 ```bash
 CLINICAL_TEST_POSTGRES_URL=postgresql://clinico:clinico_sintetico@127.0.0.1:5433/clinico \
   uv run --locked --extra backend --no-editable pytest -q

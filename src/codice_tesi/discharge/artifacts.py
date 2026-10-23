@@ -3,7 +3,7 @@
 import json
 import re
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -67,13 +67,15 @@ class RunArtifacts:
         self.finish("preparato")
 
     @contextmanager
-    def open_draft(self) -> Iterator[TextIO]:
-        """Conserva il parziale; lo rinomina solo dopo uno stream concluso e non vuoto."""
+    def open_draft(self, *, validation_context=nullcontext) -> Iterator[TextIO]:
+        """Conserva il parziale; lo rinomina dopo lo stream e i controlli di forma."""
         with self.partial.open("x", encoding="utf-8") as output:
             yield output
-        if not self.partial.read_text(encoding="utf-8").strip():
-            raise ValueError("Il modello non ha prodotto testo.")
-        self.partial.replace(self.draft)
+        with validation_context():
+            text = self.partial.read_text(encoding="utf-8")
+            if not text.strip():
+                raise ValueError("Il modello non ha prodotto testo.")
+            self.partial.replace(self.draft)
 
     def start(self) -> None:
         self.report["richieste_llm_avviate"] = 1
