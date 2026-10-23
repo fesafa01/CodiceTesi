@@ -211,6 +211,8 @@ tempCodeRunnerFile.py
 # Database e stato locale del backend documentale
 /var/
 /output/dimissioni/
+/output/
+.env.observability
 
 # PyPI configuration file
 .pypirc

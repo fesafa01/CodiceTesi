@@ -21,6 +21,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from codice_tesi import api
 from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.context import PreparedRequest
+from codice_tesi.stream_metrics import StreamObservation, active_observation
 
 
 @asynccontextmanager
@@ -67,15 +68,19 @@ class LLMDraftGenerator:
             model_settings=self.settings,
             retries=0,
         )
-        async with (
-            _first_text_deadline(self.first_text_timeout) as first_text_timer,
-            agent.run_stream_events(
-                request.prompt,
-                usage=usage,
-                usage_limits=UsageLimits(request_limit=1, tool_calls_limit=0),
-            ) as events,
-        ):
-            try:
+        observation = StreamObservation()
+        token = active_observation.set(observation)
+        completed = False
+        events = None
+        try:
+            async with (
+                _first_text_deadline(self.first_text_timeout) as first_text_timer,
+                agent.run_stream_events(
+                    request.prompt,
+                    usage=usage,
+                    usage_limits=UsageLimits(request_limit=1, tool_calls_limit=0),
+                ) as events,
+            ):
                 async for event in events:
                     text = ""
                     thinking = ""
@@ -104,22 +109,27 @@ class LLMDraftGenerator:
                             self.progress["fase"] = "redazione"
                             self.progress["caratteri_testo"] += len(text)
                             yield text
-            finally:
-                # Anche errori di limite e interruzioni conservano i contatori disponibili.
-                messages = events.all_messages() if usage.requests else []
-                for message in reversed(messages):
-                    if isinstance(message, ModelResponse):
-                        finish_reason = message.finish_reason
-                        break
-                self.progress["durata_secondi"] = round(monotonic() - started, 2)
-                self.usage = {
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                    "finish_reason": finish_reason,
-                    "stream": dict(self.progress),
-                }
-            if finish_reason != "stop":
-                raise ValueError(
-                    "Il modello non ha concluso normalmente la lettera "
-                    f"({finish_reason}); testo conservato come parziale."
-                )
+                completed = True
+        finally:
+            active_observation.reset(token)
+            # Include errori prima del primo chunk e cancellazioni del consumer.
+            messages = events.all_messages() if events is not None and usage.requests else []
+            for message in reversed(messages):
+                if isinstance(message, ModelResponse):
+                    finish_reason = message.finish_reason
+                    break
+            self.progress["durata_secondi"] = round(monotonic() - started, 6)
+            metrics = observation.snapshot(complete=completed)
+            metrics["finish_reason"] = finish_reason
+            self.usage = {
+                "input_tokens": metrics["input_tokens"],
+                "output_tokens": metrics["output_tokens"],
+                "finish_reason": finish_reason,
+                "stream": dict(self.progress),
+                "metrics": metrics,
+            }
+        if finish_reason != "stop":
+            raise ValueError(
+                "Il modello non ha concluso normalmente la lettera "
+                f"({finish_reason}); testo conservato come parziale."
+            )
