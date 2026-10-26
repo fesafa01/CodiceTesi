@@ -1,18 +1,24 @@
 """Client del backend clinico, utilizzato dall'applicazione prima della stesura."""
 
 import asyncio
+import os
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
+from codice_tesi.demo_access import DEFAULT_DEMO_TOKEN
 from codice_tesi.discharge.models import CompositionPacket
 
 
 class PacketClient:
     """Recupera e valida il pacchetto prima della generazione."""
 
-    def __init__(self, base_url: str, *, timeout: float = 20):
+    def __init__(self, base_url: str, *, timeout: float = 20, token: str | None = None):
         self.base_url, self.timeout = base_url.rstrip("/"), timeout
+        # Token pubblici di simulazione; non vengono registrati negli artefatti.
+        self._token = (
+            token if token is not None else os.getenv("APP_BACKEND_TOKEN", DEFAULT_DEMO_TOKEN)
+        )
 
     async def fetch(self, *, seed: int, context_id: str | None) -> CompositionPacket:
         """Esegue la lettura HTTP bloccante in un thread."""
@@ -25,12 +31,22 @@ class PacketClient:
             if context_id
             else "/avvio-test?" + urlencode({"seed": seed})
         )
+        request = Request(self.base_url + "/api/v1/compilazione" + path)
+        if self._token:
+            request.add_header("Authorization", "Bearer " + self._token)
         try:
-            with urlopen(
-                self.base_url + "/api/v1/compilazione" + path, timeout=self.timeout
-            ) as reply:
+            with urlopen(request, timeout=self.timeout) as reply:
                 packet = CompositionPacket.model_validate_json(reply.read())
         except HTTPError as exc:
+            if exc.code == 401:
+                raise ValueError(
+                    "Backend HTTP 401: credenziale locale assente o non valida; "
+                    "verificare APP_BACKEND_TOKEN."
+                ) from None
+            if exc.code == 403:
+                raise ValueError(
+                    "Backend HTTP 403: contesto fuori dal perimetro dell'identità locale."
+                ) from None
             raise ValueError(
                 f"Backend HTTP {exc.code}: verificare contesto e importazione con import-synthea."
             ) from None

@@ -67,16 +67,39 @@ async def save_dataset(
     return True, len(contexts)
 
 
-async def read_packet(database: Database, *, context_id=None, seed=None) -> CompositionPacket:
+async def read_packet(
+    database: Database,
+    *,
+    context_id=None,
+    seed=None,
+    allowed_context_ids: frozenset[str] | None = None,
+) -> CompositionPacket:
     """Legge contesto e note nello stesso snapshot, poi aggiunge il template Campus.
 
     Il seed seleziona soltanto il contesto; tutte le sue note vengono incluse.
     """
+    # L'API passa sempre il perimetro. Nessuna query per identificativi fuori
+    # perimetro: la risposta non rivela se il contesto esista nel database.
+    if allowed_context_ids is not None and (
+        not allowed_context_ids
+        or (context_id is not None and context_id not in allowed_context_ids)
+    ):
+        raise BackendError(403, "ACCESSO_NEGATO", "Contesto non accessibile per questa identità.")
     async with database.connection(read_only=True) as connection:
         if context_id is None:
-            cursor = await connection.execute("SELECT id FROM composition_contexts ORDER BY id")
+            if allowed_context_ids is None:
+                cursor = await connection.execute("SELECT id FROM composition_contexts ORDER BY id")
+            else:
+                cursor = await connection.execute(
+                    "SELECT id FROM composition_contexts WHERE id = ANY(%s) ORDER BY id",
+                    (sorted(allowed_context_ids),),
+                )
             ids = [row["id"] for row in await cursor.fetchall()]
             if not ids:
+                if allowed_context_ids is not None:
+                    raise BackendError(
+                        403, "ACCESSO_NEGATO", "Contesto non accessibile per questa identità."
+                    )
                 raise BackendError(409, "NESSUN_CONTESTO", "Importare un dataset di compilazione.")
             context_id = random.Random(seed).choice(ids)
         cursor = await connection.execute(

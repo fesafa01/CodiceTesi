@@ -21,7 +21,10 @@ def test_openapi_contains_only_composition_and_health_routes():
 
 def test_template_endpoint_serves_updated_requirements_without_database():
     # Questo endpoint usa la risorsa inclusa nel pacchetto, senza query SQL.
-    client = TestClient(create_app(BackendSettings(_env_file=None)))
+    client = TestClient(
+        create_app(BackendSettings(_env_file=None)),
+        headers={"Authorization": "Bearer demo-revisore"},
+    )
     response = client.get("/api/v1/compilazione/template")
     assert response.status_code == 200 and response.json()["version"] == "1.1.0"
     sections = {section["id"]: section for section in response.json()["sections"]}
@@ -40,7 +43,9 @@ def test_removed_commands_are_rejected(command):
 
 
 def test_request_errors_keep_identifiers_and_do_not_echo_values(empty_settings):
-    with TestClient(create_app(empty_settings)) as client:
+    with TestClient(
+        create_app(empty_settings), headers={"Authorization": "Bearer demo-revisore"}
+    ) as client:
         response = client.get(
             "/api/v1/compilazione/avvio-test?seed=private-test-value",
             headers={"X-Request-ID": "test-request-123"},

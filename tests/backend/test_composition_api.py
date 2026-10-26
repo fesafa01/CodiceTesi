@@ -12,14 +12,19 @@ from codice_tesi.backend.app import create_app
 from codice_tesi.backend.database import Database
 from codice_tesi.backend.repository import save_dataset
 from codice_tesi.backend.synthea import import_synthea
+from codice_tesi.demo_access import DemoIdentity
 from codice_tesi.discharge.models import Context, EvidenceSource
 
 
 def test_empty_composition_database_has_actionable_error(empty_settings):
-    with TestClient(create_app(empty_settings)) as client:
-        assert client.get("/api/v1/compilazione/avvio-test?seed=42").status_code == 409
+    with TestClient(
+        create_app(empty_settings), headers={"Authorization": "Bearer demo-revisore"}
+    ) as client:
+        assert client.get("/api/v1/compilazione/avvio-test?seed=42").status_code == 403
         assert client.get("/api/v1/compilazione/avvio-test?seed=-1").status_code == 422
-        assert client.get("/api/v1/compilazione/contesti/missing/pacchetto").status_code == 404
+        assert (
+            client.get("/api/v1/compilazione/contesti/synthea-caso-30/pacchetto").status_code == 404
+        )
         template = client.get("/api/v1/compilazione/template")
         assert template.status_code == 200 and template.json()["version"] == "1.1.0"
         assert len(template.json()["sections"]) == 17
@@ -39,7 +44,9 @@ def test_synthea_import_and_http_isolation(empty_settings, fhir):
                 await import_synthea(db, path)
 
     asyncio.run(prepare())
-    with TestClient(create_app(empty_settings)) as client:
+    with TestClient(
+        create_app(empty_settings), headers={"Authorization": "Bearer demo-revisore"}
+    ) as client:
         first = client.get("/api/v1/compilazione/avvio-test?seed=42").json()
         assert first == client.get("/api/v1/compilazione/avvio-test?seed=42").json()
         packet = client.get("/api/v1/compilazione/contesti/synthea-caso-01/pacchetto").json()
@@ -78,7 +85,11 @@ def test_repository_keeps_verified_episode_sources_ordered(empty_settings):
             assert await save_dataset(db, [context], sources) == (False, 1)
 
     asyncio.run(prepare())
-    with TestClient(create_app(empty_settings)) as client:
+    identity = DemoIdentity("fixture", "demo-test", frozenset({"verified-x"}))
+    with TestClient(
+        create_app(empty_settings, demo_identities=(identity,)),
+        headers={"Authorization": "Bearer demo-test"},
+    ) as client:
         response = client.get("/api/v1/compilazione/contesti/verified-x/pacchetto")
         assert response.status_code == 200
         packet = response.json()
@@ -130,7 +141,9 @@ def test_case_imports_all_notes_once_without_combining_other_patients(empty_sett
             assert await import_synthea(db, path) == (False, 2)
 
     asyncio.run(prepare())
-    with TestClient(create_app(empty_settings)) as client:
+    with TestClient(
+        create_app(empty_settings), headers={"Authorization": "Bearer demo-revisore"}
+    ) as client:
         packet = client.get("/api/v1/compilazione/contesti/synthea-caso-01/pacchetto").json()
         assert packet["context"]["scope"] == "episodio"
         assert set(packet) == {"schema_version", "context", "sources", "template"}

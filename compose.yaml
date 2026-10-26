@@ -8,6 +8,8 @@ services:
         required: false
     environment:
       APP_BACKEND_URL: http://backend:8001
+      # Identità pubblica fittizia per il solo prototipo locale su sintetici.
+      APP_BACKEND_TOKEN: ${APP_BACKEND_TOKEN:-demo-revisore}
       TELEMETRY_ENABLED: "true"
       TELEMETRY_ENDPOINT: http://otel-collector:4318
       TELEMETRY_PROJECT: tesi-dimissioni
