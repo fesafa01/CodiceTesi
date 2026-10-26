@@ -26,7 +26,7 @@ from codice_tesi.stream_metrics import StreamObservation, active_observation
 
 @asynccontextmanager
 async def _first_text_deadline(seconds: float):
-    """Il reasoning non può consumare indefinitamente il tempo prima della lettera."""
+    """Limita il silenzio prima della lettera; il reasoning rinnova l'attesa."""
     timer = asyncio.timeout(seconds)
     try:
         async with timer:
@@ -34,8 +34,8 @@ async def _first_text_deadline(seconds: float):
     except TimeoutError:
         if timer.expired():
             raise ValueError(
-                f"Nessun testo della lettera entro {seconds:g} secondi. "
-                "Limite di attesa iniziale/ragionamento raggiunto; "
+                f"Nessun progresso dal modello per {seconds:g} secondi prima della lettera. "
+                "Limite di attesa iniziale/inattività raggiunto; "
                 "richiesta interrotta senza retry. Contatori conservati in esito.json."
             ) from None
         raise
@@ -102,6 +102,10 @@ class LLMDraftGenerator:
                         if thinking:
                             self.progress["fase"] = "ragionamento"
                             self.progress["caratteri_ragionamento"] += len(thinking)
+                            if thinking.strip() and "primo_testo_secondi" not in self.progress:
+                                first_text_timer.reschedule(
+                                    asyncio.get_running_loop().time() + self.first_text_timeout
+                                )
                         if text:
                             if "primo_testo_secondi" not in self.progress and text.strip():
                                 first_text_timer.reschedule(None)

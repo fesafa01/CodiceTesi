@@ -32,6 +32,21 @@ def test_all_notes_are_included_once(packet_factory):
     assert "BOZZA GIÀ SCRITTA" not in prompt
 
 
+def test_requirements_and_histology_empty_cell_rule_reach_model(packet_factory):
+    text = build_instructions(packet_factory("diario").template)
+    assert "11. Condizione clinica alla dimissione\nRequisito: obbligatorio." in text
+    for title in (
+        "3. Diagnosi alla dimissione testuale",
+        "9. Esami di laboratorio",
+        "12. Programma terapeutico, istruzioni e follow-up",
+    ):
+        assert title + "\nRequisito: facoltativo." in text
+    assert "15. In attesa di esame istologico\nRequisito: obbligatorio." in text
+    assert "Solo Sì oppure No, senza spiegazioni" in text
+    assert "Con No lascia il contenuto vuoto, mantenendo l'intestazione" in text
+    assert "segnala il dato mancante nel campo binario e lascia vuoti i dettagli" in text
+
+
 def test_request_rejects_context_budget_before_inference_without_truncating_notes(packet_factory):
     packet = packet_factory("anamnesi", text="Fonte ampia. " * 10000)
     with pytest.raises(ValueError, match="Nessuna nota è stata troncata"):

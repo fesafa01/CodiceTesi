@@ -29,15 +29,12 @@ def sse(text, finish=None):
 
 @pytest.mark.parametrize("thinking", [False, True])
 def test_single_http_call_streams_before_completion_and_flushes_same_file(
-    packet_factory, tmp_path, monkeypatch, capsys, thinking
+    packet_factory, tmp_path, monkeypatch, capsys, thinking, letter_factory
 ):
     packet = packet_factory("triage", "anamnesi")
     calls = []
     hidden = "Controllo interno sintetico."
-    letter = "BOZZA DI LETTERA DI DIMISSIONE - DA REVISIONARE\n" + "\n".join(
-        f"{index}. {field.title}\nTesto di fixture.\n"
-        for index, field in enumerate(packet.template.sections, 1)
-    )
+    letter = letter_factory()
 
     async def fetch(self, **kwargs):
         return packet
@@ -141,7 +138,7 @@ def test_stream_has_finite_idle_timeout_without_retries():
 
 
 @pytest.mark.parametrize("first_part", ["thinking", "whitespace", "text"])
-def test_first_text_deadline_limits_reasoning_but_not_running_letter(packet_factory, first_part):
+def test_first_text_deadline_limits_silence_but_not_running_letter(packet_factory, first_part):
     async def check():
         class Stream(httpx.AsyncByteStream):
             async def __aiter__(self):
@@ -178,6 +175,37 @@ def test_first_text_deadline_limits_reasoning_but_not_running_letter(packet_fact
                 with pytest.raises(ValueError, match="Limite di attesa"):
                     await consume()
                 assert "primo_testo_secondi" not in generator.usage["stream"]
+
+    asyncio.run(check())
+
+
+def test_active_reasoning_renews_deadline_until_the_letter_starts(packet_factory):
+    async def check():
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                for _ in range(6):
+                    event = json.loads(sse("").decode().removeprefix("data: "))
+                    event["choices"][0]["delta"] = {"reasoning_content": "Controllo"}
+                    yield f"data: {json.dumps(event)}\n\n".encode()
+                    await asyncio.sleep(0.03)
+                yield sse("Lettera.", "stop")
+                yield b"data: [DONE]\n\n"
+
+        def handler(request):
+            return httpx.Response(
+                200, headers={"Content-Type": "text/event-stream"}, stream=Stream()
+            )
+
+        async with AsyncOpenAI(
+            base_url="http://test/v1",
+            api_key="test",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        ) as client:
+            generator = LLMDraftGenerator(ModelConfig(first_text_timeout=0.1), client)
+            request = prepare_request(packet_factory("diario"), ContextConfig(), output_tokens=100)
+            assert "".join([chunk async for chunk in generator.stream(request)]) == "Lettera."
+            assert generator.usage["stream"]["primo_testo_secondi"] >= 0.18
 
     asyncio.run(check())
 
@@ -300,9 +328,10 @@ def test_timeout_before_first_text_preserves_failure_without_retry(
 
 @pytest.mark.parametrize("finish", ["stop", "length"])
 def test_truncated_response_keeps_partial_and_does_not_retry(
-    packet_factory, tmp_path, monkeypatch, finish
+    packet_factory, tmp_path, monkeypatch, finish, letter_factory
 ):
     calls = []
+    text = letter_factory(answer="No") if finish == "stop" else "Testo"
 
     async def fetch(self, **kwargs):
         return packet_factory("triage")
@@ -312,7 +341,7 @@ def test_truncated_response_keeps_partial_and_does_not_retry(
         return httpx.Response(
             200,
             headers={"Content-Type": "text/event-stream"},
-            content=sse("Testo", finish) + b"data: [DONE]\n\n",
+            content=sse(text, finish) + b"data: [DONE]\n\n",
         )
 
     def create_client(settings, *, streaming=False):
@@ -333,7 +362,7 @@ def test_truncated_response_keeps_partial_and_does_not_retry(
 
     if finish == "stop":
         directory = run()
-        assert (directory / "bozza.txt").read_text() == "Testo"
+        assert (directory / "bozza.txt").read_text() == text
     else:
         with pytest.raises(ValueError, match="parziale"):
             run()

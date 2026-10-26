@@ -20,6 +20,7 @@ class ModelConfig(BaseModel):
     seed: int | None = None
     thinking: bool = True
     reasoning_effort: str | None = Field(default="low", min_length=1)
+    # Prima del testo, ogni evento di reasoning rinnova questo limite di inattività.
     first_text_timeout: float = Field(default=240, gt=0)
 
     def request_settings(self) -> OpenAIChatModelSettings:

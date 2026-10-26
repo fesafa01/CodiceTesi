@@ -19,6 +19,19 @@ def test_openapi_contains_only_composition_and_health_routes():
     }
 
 
+def test_template_endpoint_serves_updated_requirements_without_database():
+    # Questo endpoint usa la risorsa inclusa nel pacchetto, senza query SQL.
+    client = TestClient(create_app(BackendSettings(_env_file=None)))
+    response = client.get("/api/v1/compilazione/template")
+    assert response.status_code == 200 and response.json()["version"] == "1.1.0"
+    sections = {section["id"]: section for section in response.json()["sections"]}
+    assert sections["condizioni_dimissione"]["requirement"]["status"] == "required"
+    for section_id in ("diagnosi_dimissione", "esami_laboratorio", "programma_followup"):
+        assert sections[section_id]["requirement"]["status"] == "optional"
+    assert sections["istologico_in_attesa"]["fields"][0]["type"] == "boolean"
+    assert sections["informazioni_istologico"]["applies_when"]["equals"] is True
+
+
 @pytest.mark.parametrize("command", ["scenario", "import-dataset", "validate-dataset"])
 def test_removed_commands_are_rejected(command):
     with pytest.raises(SystemExit) as exc:

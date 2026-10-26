@@ -14,6 +14,7 @@ from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.context import PreparedRequest
 from codice_tesi.discharge.models import CompositionPacket
 from codice_tesi.discharge.prompts import PROMPT_VERSION
+from codice_tesi.discharge.validation import validate_draft
 
 
 class RunArtifacts:
@@ -28,6 +29,7 @@ class RunArtifacts:
         config: ModelConfig,
         preview: bool = False,
     ):
+        self.template = packet.template
         context_name = re.sub(r"[^a-zA-Z0-9._-]", "_", packet.context.id).strip(".")[:80]
         if context_name != packet.context.id:
             context_name = (
@@ -75,6 +77,7 @@ class RunArtifacts:
             text = self.partial.read_text(encoding="utf-8")
             if not text.strip():
                 raise ValueError("Il modello non ha prodotto testo.")
+            validate_draft(text, self.template)
             self.partial.replace(self.draft)
 
     def start(self) -> None:

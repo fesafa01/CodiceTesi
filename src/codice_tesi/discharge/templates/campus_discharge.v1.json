@@ -1,16 +1,17 @@
 {
   "schema_version": "1.0",
   "id": "campus-discharge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "title": "Relazione di dimissione — modello Campus del prototipo",
   "source_reference": "policlinico/lettera_dimissione/componenti/Modello_Attuale.md#campi-della-relazione-conservati-come-riferimento",
   "interpretation_notes": [
-    "Ricostruzione dai materiali della call Campus del 1 ottobre 2026: non è un modello certificato del fornitore.",
-    "required indica un asterisco riportato negli appunti; le ambiguità sono conservate come unconfirmed.",
-    "Assenza di asterisco non equivale a facoltatività accertata.",
+    "Ricostruzione dai materiali della call Campus del 1 ottobre 2026, aggiornata con lo schema annotato e il chiarimento del 22 ottobre 2026: non è un modello certificato del fornitore.",
+    "Nello schema annotato del 22 ottobre 2026 gli asterischi identificano i campi obbligatori; i campi privi di asterisco sono facoltativi, salvo le informazioni istologiche subordinate alla risposta sì.",
+    "Data di dimissione e nominativi dei medici non compaiono nello schema annotato: restano rispettivamente unconfirmed e optional in base alla call.",
     "Sottocampi, tipi e required_for_completeness sono una scomposizione tecnica proposta per il prototipo, non obblighi singolarmente attestati dalla call.",
     "Un campo obbligatorio privo di dati resta mancante nella bozza e nel rapporto di completezza; non autorizza a inventare informazioni.",
-    "Nessun recapito, anagrafica, codice o valore clinico predefinito è incorporato nel template."
+    "Nessun recapito, anagrafica, codice o valore clinico predefinito è incorporato nel template.",
+    "In attesa di esame istologico è una scelta binaria obbligatoria sì/no; con no il campo informazioni istologiche resta vuoto. La mancanza di una risposta documentata è una lacuna, non un no."
   ],
   "sections": [
     {
@@ -18,7 +19,7 @@
       "title": "Identificativi del paziente e struttura",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": false,
       "instruction": "Riporta soltanto identificativi verificati e dati anagrafici o organizzativi espliciti. Non usare note_id come identità clinica.",
@@ -101,8 +102,8 @@
       "id": "diagnosi_dimissione",
       "title": "Diagnosi alla dimissione testuale",
       "requirement": {
-        "status": "unconfirmed",
-        "basis": "Nessun asterisco riportato: obbligatorietà non accertata, non equivale a facoltatività confermata."
+        "status": "optional",
+        "basis": "Campo senza asterisco nello schema annotato condiviso il 22 ottobre 2026; facoltatività chiarita dall’utente."
       },
       "repeatable": true,
       "instruction": "Riporta esclusivamente diagnosi documentate alla dimissione, conservando sospetti e qualificazioni. Non diagnosticare dai sintomi.",
@@ -129,7 +130,7 @@
       "title": "Diagnosi alla dimissione codificate",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": true,
       "instruction": "Trascrivi codici presenti nelle fonti della dimissione. Non codificare autonomamente diagnosi testuali e non confermare la diagnosi iniziale.",
@@ -163,7 +164,7 @@
       "title": "Procedure alla dimissione codificate",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": true,
       "instruction": "Trascrivi soltanto codici procedurali espliciti associati alla dimissione; non generarli da descrizioni di interventi.",
@@ -197,7 +198,7 @@
       "title": "Motivo del ricovero",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": false,
       "instruction": "Sintetizza la ragione documentata dell’accesso e l’eventuale indicazione al ricovero. Distingui sintomo, sospetto e diagnosi già documentata.",
@@ -231,7 +232,7 @@
       "title": "Problemi non attivi",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": true,
       "instruction": "Riporta solo problemi esplicitamente pregressi, risolti o non attivi. L’assenza di menzione non dimostra risoluzione.",
@@ -265,7 +266,7 @@
       "title": "Procedure diagnostiche e terapeutiche",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": true,
       "instruction": "Distingui procedure eseguite, richieste e programmate. Mantieni ogni procedura e relativo esito nello stesso record.",
@@ -312,8 +313,8 @@
       "id": "esami_laboratorio",
       "title": "Esami di laboratorio",
       "requirement": {
-        "status": "unconfirmed",
-        "basis": "Nessun asterisco riportato: obbligatorietà non accertata, non equivale a facoltatività confermata."
+        "status": "optional",
+        "basis": "Campo senza asterisco nello schema annotato condiviso il 22 ottobre 2026; facoltatività chiarita dall’utente."
       },
       "repeatable": true,
       "instruction": "Riporta risultati documentati con nome, valore ed eventuale unità. Non aggiungere intervalli o interpretazioni cliniche proprie.",
@@ -354,7 +355,7 @@
       "title": "Epicrisi e decorso ospedaliero",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": true,
       "instruction": "Aggrega gli eventi e l’evoluzione documentata; ordina cronologicamente solo se le fonti consentono un ordine verificabile. Non inventare guarigione o conclusione del ricovero.",
@@ -387,8 +388,8 @@
       "id": "condizioni_dimissione",
       "title": "Condizione clinica alla dimissione",
       "requirement": {
-        "status": "unconfirmed",
-        "basis": "Asterisco negli appunti, ma trascrizione ambigua: obbligatorietà effettiva da confermare."
+        "status": "required",
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": false,
       "instruction": "Riporta soltanto condizioni esplicitamente riferite al momento della dimissione, senza usare una visita intermedia come stato finale.",
@@ -421,8 +422,8 @@
       "id": "programma_followup",
       "title": "Programma terapeutico, istruzioni e follow-up",
       "requirement": {
-        "status": "unconfirmed",
-        "basis": "Nessun asterisco riportato: obbligatorietà non accertata, non equivale a facoltatività confermata."
+        "status": "optional",
+        "basis": "Campo senza asterisco nello schema annotato condiviso il 22 ottobre 2026; facoltatività chiarita dall’utente."
       },
       "repeatable": true,
       "instruction": "Aggrega solo indicazioni prescritte o istruzioni già documentate. Non proporre controlli, trattamenti o raccomandazioni.",
@@ -456,7 +457,7 @@
       "title": "Terapia in dimissione",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": true,
       "instruction": "Riporta solo prescrizioni finali esplicite. La terapia domiciliare di ingresso e i farmaci somministrati durante la degenza non costituiscono automaticamente terapia in dimissione. Usa un record per prescrizione.",
@@ -504,7 +505,7 @@
       "title": "Contatti per follow-up e istruzioni urgenti",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": true,
       "instruction": "Usa soltanto recapiti e istruzioni forniti dal modello di reparto o documentati nelle fonti. Non inventare numeri, servizi o indicazioni urgenti.",
@@ -538,10 +539,10 @@
       "title": "In attesa di esame istologico",
       "requirement": {
         "status": "required",
-        "basis": "Asterisco negli appunti della call Campus del 1 ottobre 2026; requisito riportato, non certificato dal fornitore."
+        "basis": "Asterisco nello schema annotato condiviso il 22 ottobre 2026; requisito confermato dal chiarimento sui campi obbligatori."
       },
       "repeatable": false,
-      "instruction": "Determina sì/no esclusivamente da una dichiarazione esplicita riferita alla dimissione. La mancanza di menzione non equivale a no.",
+      "instruction": "Campo binario obbligatorio: riporta soltanto Sì oppure No da una dichiarazione esplicita riferita alla dimissione. Se la risposta non è documentata, segnala il dato da completare senza assumere No.",
       "fields": [
         {
           "id": "attesa",
@@ -558,10 +559,10 @@
       "title": "Informazioni sull’istologico",
       "requirement": {
         "status": "conditional",
-        "basis": "Testo aggiuntivo previsto quando è documentata un’attesa; regola condizionale del prototipo, non un obbligo autonomo certificato."
+        "basis": "Campo aggiuntivo subordinato alla risposta Sì in attesa di esame istologico, secondo il chiarimento del 22 ottobre 2026; con No la cella resta vuota."
       },
       "repeatable": false,
-      "instruction": "Compila i dettagli solo se è documentato che l’istologico è in attesa; segnala condizioni non accertabili e non inventare modalità di ritiro.",
+      "instruction": "Compila i dettagli solo con risposta Sì a In attesa di esame istologico. Con No lascia il contenuto completamente vuoto, senza trattini, non applicabile o formule di dato mancante. Se la risposta non è documentata, lascia vuoti i dettagli e segnala la lacuna nel solo campo binario. Con Sì e dettagli assenti segnala il dato mancante, senza inventare esame o modalità di ritiro.",
       "fields": [
         {
           "id": "esame",

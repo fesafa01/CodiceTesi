@@ -21,7 +21,7 @@ def test_empty_composition_database_has_actionable_error(empty_settings):
         assert client.get("/api/v1/compilazione/avvio-test?seed=-1").status_code == 422
         assert client.get("/api/v1/compilazione/contesti/missing/pacchetto").status_code == 404
         template = client.get("/api/v1/compilazione/template")
-        assert template.status_code == 200 and template.json()["version"] == "1.0.0"
+        assert template.status_code == 200 and template.json()["version"] == "1.1.0"
         assert len(template.json()["sections"]) == 17
 
 

@@ -6,15 +6,39 @@ from pydantic import ValidationError
 from codice_tesi.discharge.template import LetterTemplate, load_template
 
 
-def test_template_covers_all_campus_fields_and_preserves_uncertainty():
+def test_template_covers_campus_fields_and_requirements_from_annotated_form():
     template = load_template()
-    assert template.id == "campus-discharge" and template.version == "1.0.0"
+    assert template.id == "campus-discharge" and template.version == "1.1.0"
     assert len(template.sections) == 17 and len(template.sha256) == 64
-    assert template.section("motivo_ricovero").requirement.status == "required"
-    assert template.section("esami_laboratorio").requirement.status == "unconfirmed"
-    assert template.section("condizioni_dimissione").requirement.status == "unconfirmed"
-    assert template.section("medici").requirement.status == "optional"
-    assert template.section("informazioni_istologico").requirement.status == "conditional"
+    requirements = {
+        "identificazione": "required",
+        "data_dimissione": "unconfirmed",
+        "diagnosi_dimissione": "optional",
+        "diagnosi_codificate": "required",
+        "procedure_codificate": "required",
+        "motivo_ricovero": "required",
+        "problemi_non_attivi": "required",
+        "procedure_diagnostiche_terapeutiche": "required",
+        "esami_laboratorio": "optional",
+        "decorso": "required",
+        "condizioni_dimissione": "required",
+        "programma_followup": "optional",
+        "terapia_dimissione": "required",
+        "contatti_urgenze": "required",
+        "istologico_in_attesa": "required",
+        "informazioni_istologico": "conditional",
+        "medici": "optional",
+    }
+    assert {s.id: s.requirement.status for s in template.sections} == requirements
+    pending = template.section("istologico_in_attesa")
+    assert not pending.repeatable
+    assert len(pending.fields) == 1 and pending.fields[0].type == "boolean"
+    assert pending.fields[0].required_for_completeness
+    assert template.section("informazioni_istologico").applies_when.model_dump() == {
+        "section_id": "istologico_in_attesa",
+        "field_id": "attesa",
+        "equals": True,
+    }
     assert template.section("terapia_dimissione").repeatable
     assert [field.id for field in template.section("terapia_dimissione").fields] == [
         "farmaco",
