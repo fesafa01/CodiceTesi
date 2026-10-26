@@ -27,6 +27,7 @@ jobs:
         with:
           version: "0.11.19"
           enable-cache: true
+      - run: docker compose config --quiet
       - run: uv sync --locked --extra backend --no-editable --python 3.13
       - run: uv run --locked --extra backend --no-editable ruff check .
       - run: uv run --locked --extra backend --no-editable ruff format --check .

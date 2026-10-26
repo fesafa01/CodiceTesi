@@ -21,7 +21,7 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from codice_tesi import api
 from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.context import PreparedRequest
-from codice_tesi.stream_metrics import StreamObservation, active_observation
+from codice_tesi.observability.stream_metrics import StreamObservation, active_observation
 
 
 @asynccontextmanager

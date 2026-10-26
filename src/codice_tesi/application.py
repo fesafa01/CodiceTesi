@@ -16,8 +16,8 @@ from codice_tesi.discharge.client import PacketClient
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.generator import LLMDraftGenerator
-from codice_tesi.execution import ExecutionRecord, ExperimentConfig
-from codice_tesi.observability import Telemetry, TelemetryConfig
+from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfig
+from codice_tesi.observability.telemetry import Telemetry, TelemetryConfig
 
 
 async def _record_progress(generator, artifacts, record):

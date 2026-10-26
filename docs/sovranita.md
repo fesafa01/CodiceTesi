@@ -93,6 +93,6 @@ Per ogni prova conservare versione del protocollo, operatore, tempi UTC, ambient
 
 ## Evidenze e manutenzione
 
-I risultati sintetici sono nel [registro delle verifiche](verifiche-sovranita.md); tracce e metriche sono descritte in [osservabilità](osservabilita.md). I dettagli locali sono sotto `output/verifiche/`, esclusi da Git e dalle immagini. Non pubblicare richieste complete o dump di credenziali per documentare una prova.
+I risultati sintetici sono nel [registro delle verifiche](verifiche-sovranita.md); tracce e metriche sono descritte in [osservabilità](../observability/README.md). I dettagli locali sono sotto `output/verifiche/`, esclusi da Git e dalle immagini. Non pubblicare richieste complete o dump di credenziali per documentare una prova.
 
 Le modifiche a modello, runtime, rete, accessi o logging richiedono di rivalutare le prove dipendenti. Questo protocollo documenta un perimetro di controllo; non è una certificazione di conformità né un risultato di efficacia clinica.

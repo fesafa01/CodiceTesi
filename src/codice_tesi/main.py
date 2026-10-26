@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> None:
         "--telemetry",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="Abilita/disabilita OTLP; configurazione in .env.observability o TELEMETRY_*.",
+        help="Abilita/disabilita OTLP; configurazione in observability/.env o TELEMETRY_*.",
     )
     discharge.add_argument(
         "--dry-run",
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         if args.command == "registro":
-            from codice_tesi.execution import export_registry
+            from codice_tesi.observability.execution import export_registry
 
             count = export_registry(args.output_dir, args.destination, format=args.format)
             print(f"Esportate {count} esecuzioni: {args.destination}")
@@ -90,8 +90,8 @@ def main(argv: list[str] | None = None) -> None:
         if args.command == "dimissione":
             from codice_tesi.application import run_application
             from codice_tesi.discharge.config import ContextConfig
-            from codice_tesi.execution import ExperimentConfig
-            from codice_tesi.observability import TelemetryConfig
+            from codice_tesi.observability.execution import ExperimentConfig
+            from codice_tesi.observability.telemetry import TelemetryConfig
 
             config = ModelConfig()
             if args.thinking is not None:

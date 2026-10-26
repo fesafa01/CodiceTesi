@@ -23,7 +23,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class TelemetryConfig(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="TELEMETRY_", env_file=".env.observability", extra="forbid"
+        env_prefix="TELEMETRY_", env_file="observability/.env", extra="forbid"
     )
     enabled: bool = False
     endpoint: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:4318")

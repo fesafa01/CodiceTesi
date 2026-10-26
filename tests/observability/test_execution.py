@@ -6,7 +6,7 @@ from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.artifacts import RunArtifacts
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
-from codice_tesi.execution import ExecutionRecord, ExperimentConfig, export_registry
+from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfig, export_registry
 
 
 def test_registry_correlates_artifacts_and_exports_without_clinical_text(
@@ -65,3 +65,27 @@ def test_multiple_attempts_have_distinct_records_and_keep_failures(tmp_path):
     assert stored["error_type"] == "ValueError" and stored["llm"] is None
     assert "PRIVATE_ERROR_TEXT" not in records[0].path.read_text()
     assert json.loads(records[1].path.read_text())["status"] == "preparing"
+
+
+def test_manifest_tracks_application_and_templates_outside_observability(tmp_path, monkeypatch):
+    from codice_tesi.observability import execution
+
+    package = tmp_path / "codice_tesi"
+    instrumentation = package / "observability"
+    instrumentation.mkdir(parents=True)
+    module = instrumentation / "execution.py"
+    module.write_text("# registry")
+    application = package / "application.py"
+    application.write_text("# application v1")
+    template = package / "discharge/templates/campus.json"
+    template.parent.mkdir(parents=True)
+    template.write_text('{"version": "1"}')
+    monkeypatch.setattr(execution, "__file__", str(module))
+
+    first = execution.software_manifest()["source_sha256"]
+    application.write_text("# application v2")
+    second = execution.software_manifest()["source_sha256"]
+    template.write_text('{"version": "2"}')
+    third = execution.software_manifest()["source_sha256"]
+
+    assert first != second != third

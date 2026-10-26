@@ -14,7 +14,7 @@ from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from codice_tesi.config import ModelConfig, Settings
-from codice_tesi.stream_metrics import active_observation
+from codice_tesi.observability.stream_metrics import active_observation
 
 
 class MeasuredStreamedResponse(OpenAIStreamedResponse):

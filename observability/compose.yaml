@@ -1,0 +1,93 @@
+services:
+  phoenix-db:
+    image: postgres:17-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27
+    environment:
+      POSTGRES_DB: phoenix
+      POSTGRES_USER: phoenix
+      POSTGRES_PASSWORD: phoenix_locale
+    volumes:
+      - phoenix-db:/var/lib/postgresql/data
+    networks: [observability]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phoenix -d phoenix"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  phoenix:
+    image: arizephoenix/phoenix:version-20.25.0
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://phoenix:phoenix_locale@phoenix-db:5432/phoenix
+      PHOENIX_ENABLE_AUTH: "false"
+      PHOENIX_TELEMETRY_ENABLED: "false"
+      PHOENIX_ALLOW_EXTERNAL_RESOURCES: "false"
+      PHOENIX_WORKING_DIR: /tmp/phoenix
+    ports:
+      - "127.0.0.1:6006:6006"
+    networks: [observability]
+    depends_on:
+      phoenix-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6006/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.163.2
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      GOMEMLIMIT: 192MiB
+    volumes:
+      - ./collector.yaml:/etc/otelcol/config.yaml:ro
+      - otel-queue:/var/lib/otelcol
+    ports:
+      - "127.0.0.1:4318:4318"
+    networks: [default, observability]
+    depends_on:
+      otel-storage-init:
+        condition: service_completed_successfully
+      phoenix:
+        condition: service_healthy
+    restart: unless-stopped
+
+  otel-storage-init:
+    image: busybox:1.37.0
+    user: "0:0"
+    network_mode: none
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /var/lib/otelcol/queue
+        chown -R 10001:10001 /var/lib/otelcol
+    volumes:
+      - otel-queue:/var/lib/otelcol
+    restart: "no"
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=90d
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [observability]
+    depends_on: [otel-collector]
+    restart: unless-stopped
+
+volumes:
+  phoenix-db:
+  otel-queue:
+  prometheus-data:
+
+networks:
+  observability: {}

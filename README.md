@@ -64,6 +64,12 @@ docker compose up -d --no-deps backend
 
 ## Osservabilità e verifiche
 
+Lo stack, le configurazioni e la relativa guida sono raccolti in `observability/`.
+Il `compose.yaml` principale include `observability/compose.yaml`: i comandi
+restano eseguibili dalla radice con Docker Compose 2.20.0 o successivo. Registro,
+metriche dello stream ed export sono nel package `src/codice_tesi/observability/`;
+i relativi test sono in `tests/observability/`.
+
 ```bash
 docker compose up -d --wait phoenix-db phoenix otel-collector prometheus
 # Con backend e serving già disponibili:
@@ -74,12 +80,12 @@ uv run --locked --no-editable python main.py registro --format csv \
 ```
 
 Le interfacce locali sono [Phoenix](http://127.0.0.1:6006) e
-[Prometheus](http://127.0.0.1:9090). Sul Mac configurare `.env.observability`
-dall'esempio senza sovrascrivere impostazioni esistenti. `--no-telemetry` disattiva
-l'export mantenendo il registro. I contenuti delle fonti e della bozza restano
+[Prometheus](http://127.0.0.1:9090). Sul Mac configurare `observability/.env`
+da `observability/.env.example` senza sovrascrivere impostazioni esistenti.
+`--no-telemetry` disattiva l'export mantenendo il registro. I contenuti delle fonti e della bozza restano
 negli artefatti locali e non sono esportati nelle tracce previste.
 
-- [Osservabilità](docs/osservabilita.md): componenti, misure, uso e limiti.
+- [Osservabilità](observability/README.md): componenti, misure, uso e limiti.
 - [Sovranità](docs/sovranita.md): protocollo, accessi, conservazione e prove aperte.
 - [Verifiche svolte](docs/verifiche-sovranita.md): risultati sintetici e perimetro.
 

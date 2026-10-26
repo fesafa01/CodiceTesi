@@ -5,6 +5,30 @@ visualizza le tracce e le singole chiamate LLM; Prometheus conserva gli istogram
 e i contatori aggregati. Un valore assente resta `null`: non viene sostituito con
 zero, né ricavato dal numero di caratteri o chunk.
 
+## Organizzazione dei file
+
+```text
+observability/
+  compose.yaml       # Phoenix, DB tracce, Collector, Prometheus e volumi
+  collector.yaml     # Pipeline OTLP e coda persistente
+  prometheus.yaml    # Scrape delle metriche
+  .env.example       # Configurazione pubblica per il client sul Mac
+  .env               # Configurazione locale esclusa da Git e immagini
+  README.md          # Uso, definizioni delle misure e limiti
+src/codice_tesi/observability/
+  execution.py       # Registro atomico, manifest ed esportazione CSV/JSONL
+  stream_metrics.py  # Osservazioni dello stream, senza conservarne i testi
+  telemetry.py       # Configurazione ed export OpenTelemetry
+tests/observability/ # Test del registro, delle misure e dell'isolamento dei dati
+```
+
+Tutti i comandi Docker di questa pagina si eseguono dalla radice `CodiceTesi`.
+Il Compose principale include lo stack: nomi di servizi, progetto, reti e volumi
+restano quelli esistenti. Non avviare il Compose incluso come progetto separato.
+Sono richiesti Docker Compose con supporto a `include` (2.20.0 o successivo).
+L'applicazione mantiene soltanto i collegamenti al Collector e ai moduli Python.
+Il registro resta disponibile anche quando l'export è disabilitato.
+
 ## Architettura
 
 ```mermaid
@@ -17,8 +41,8 @@ flowchart LR
     PROM[Prometheus] -->|scrape ogni 5 s| EXP
 ```
 
-Servizi separati in `compose.yaml`: `phoenix`, `phoenix-db`, `otel-collector`,
-`prometheus`. `otel-storage-init` è un servizio iniziale che prepara i permessi del
+Servizi definiti in `observability/compose.yaml`, incluso dal Compose principale:
+`phoenix`, `phoenix-db`, `otel-collector`, `prometheus`. `otel-storage-init` è un servizio iniziale che prepara i permessi del
 volume e termina; il Collector viene eseguito con l'utente non privilegiato della
 sua immagine. Il database Phoenix è separato dal database dei ricoveri.
 
@@ -61,14 +85,14 @@ Per l'esecuzione Python sul Mac:
 
 ```bash
 # Eseguito già durante l'integrazione; non sovrascrivere una configurazione personale.
-cp -n .env.observability.example .env.observability
+cp -n observability/.env.example observability/.env
 uv sync --locked --extra backend --no-editable
 uv run --locked --no-editable python main.py dimissione \
   --contesto synthea-caso-02 --thinking \
   --experiment-file experiments/exploratory.example.json
 ```
 
-Il file `.env.observability` è separato da `.env`, destinato alla connessione LLM.
+Il file `observability/.env` è separato da `.env`, destinato alla connessione LLM.
 Variabili: `TELEMETRY_ENABLED`, `TELEMETRY_ENDPOINT`, `TELEMETRY_PROJECT`,
 `TELEMETRY_EXPORT_TIMEOUT_SECONDS`. Nel container l'endpoint è
 `http://otel-collector:4318`; sul Mac è `http://127.0.0.1:4318`.
@@ -201,7 +225,7 @@ negli artefatti locali già previsti: la gestione del loro accesso resta necessa
 quando il dataset cambierà. La dashboard non offre il replay del prompt perché il
 contenuto non è stato caricato.
 
-La [politica dimostrativa di conservazione](sovranita.md#conservazione-e-cancellazione-dimostrative) è
+La [politica dimostrativa di conservazione](../docs/sovranita.md#conservazione-e-cancellazione-dimostrative) è
 verificata su nuove copie locali e fixture su file di log/tracce/metriche/cache.
 Non applica la scadenza di 24 ore ai servizi in esercizio: Prometheus mantiene
 la retention di 90 giorni configurata in Compose; persistenza Phoenix, coda del

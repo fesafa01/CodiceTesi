@@ -62,7 +62,7 @@ def _source_files(root):
 
 
 def software_manifest():
-    root = Path(__file__).parent
+    root = Path(__file__).parents[1]
     digest = hashlib.sha256()
     for file in _source_files(root):
         digest.update(str(file.relative_to(root)).encode() + b"\0" + file.read_bytes())

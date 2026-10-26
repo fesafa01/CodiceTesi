@@ -11,13 +11,14 @@ from opentelemetry.sdk.metrics.export import MetricExporter, MetricExportResult
 from opentelemetry.sdk.trace.export import SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from codice_tesi import api, application, observability
+from codice_tesi import api, application
 from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.generator import LLMDraftGenerator
-from codice_tesi.execution import ExperimentConfig, export_registry
-from codice_tesi.observability import TelemetryConfig
+from codice_tesi.observability import telemetry as observability
+from codice_tesi.observability.execution import ExperimentConfig, export_registry
+from codice_tesi.observability.telemetry import TelemetryConfig
 
 
 @pytest.fixture
@@ -236,7 +237,7 @@ def test_trace_and_registry_correlate_without_content_or_duplicate_llm_spans(
 def test_inconsistent_token_contract_does_not_create_fake_visible_tokens(packet_factory):
     from openai.types.chat import ChatCompletionChunk
 
-    from codice_tesi.stream_metrics import StreamObservation
+    from codice_tesi.observability.stream_metrics import StreamObservation
 
     observation = StreamObservation()
     observation.start()
@@ -272,7 +273,7 @@ def test_experiment_metadata_rejects_unknown_fields():
 def test_source_manifest_excludes_files_not_in_installed_distribution(tmp_path, monkeypatch):
     from pathlib import Path, PurePosixPath
 
-    from codice_tesi import execution
+    from codice_tesi.observability import execution
 
     root = tmp_path / "codice_tesi"
     root.mkdir()

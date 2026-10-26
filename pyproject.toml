@@ -35,6 +35,9 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.uv]
 # L'installazione non-editable deve seguire anche sorgenti e template, non solo i metadati.
 cache-keys = [

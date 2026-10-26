@@ -213,7 +213,7 @@ tempCodeRunnerFile.py
 /output/dimissioni/
 /output/
 /verifiche/
-.env.observability
+/observability/.env
 
 # PyPI configuration file
 .pypirc
