@@ -201,6 +201,12 @@ negli artefatti locali già previsti: la gestione del loro accesso resta necessa
 quando il dataset cambierà. La dashboard non offre il replay del prompt perché il
 contenuto non è stato caricato.
 
+La [politica dimostrativa di conservazione](sovranita.md#conservazione-e-cancellazione-dimostrative) è
+verificata su nuove copie locali e fixture su file di log/tracce/metriche/cache.
+Non applica la scadenza di 24 ore ai servizi in esercizio: Prometheus mantiene
+la retention di 90 giorni configurata in Compose; persistenza Phoenix, coda del
+Collector, log Docker e serving richiedono regole e verifiche separate.
+
 ## Prometheus e comandi brevi
 
 Il client esporta metriche con temporalità **delta**; il processore

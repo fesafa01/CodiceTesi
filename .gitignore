@@ -212,6 +212,7 @@ tempCodeRunnerFile.py
 /var/
 /output/dimissioni/
 /output/
+/verifiche/
 .env.observability
 
 # PyPI configuration file

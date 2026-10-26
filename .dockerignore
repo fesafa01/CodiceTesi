@@ -13,6 +13,7 @@ build
 data
 var
 output
+verifiche
 
 # Documentazione e strumenti offline non necessari alle immagini runtime.
 docs
