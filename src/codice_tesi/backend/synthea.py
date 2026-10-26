@@ -1,4 +1,4 @@
-"""FHIR Synthea → fonti del ricovero, senza integrazioni cliniche manuali."""
+"""FHIR Synthea e scenari derivati → fonti della sola degenza selezionata."""
 
 import base64
 import hashlib
@@ -11,7 +11,7 @@ from codice_tesi.backend.repository import save_dataset
 from codice_tesi.discharge.models import Context, EvidenceSource
 
 DATASET = "synthea-dimissioni"
-EXTRACTION_VERSION = "synthea-degenza-v4"
+EXTRACTION_VERSION = "synthea-degenza-v5"
 EVENT_TYPES = {
     "Condition",
     "Observation",
@@ -22,6 +22,8 @@ EVENT_TYPES = {
     "DiagnosticReport",
     "DocumentReference",
     "ImagingStudy",
+    "ServiceRequest",
+    "Appointment",
 }
 
 
@@ -50,6 +52,12 @@ def _json(value):
 
 
 def _time(resource):
+    # Per richieste e prenotazioni conta quando l'informazione è stata registrata,
+    # non quando si terrà il controllo futuro.
+    if resource["resourceType"] == "ServiceRequest":
+        return resource.get("authoredOn"), None
+    if resource["resourceType"] == "Appointment":
+        return resource.get("created"), None
     for key in ("performedPeriod", "effectivePeriod", "period"):
         if resource.get(key, {}).get("start"):
             return resource[key]["start"], resource[key].get("end")
@@ -72,6 +80,12 @@ def _encounter_refs(resource):
     context = resource.get("context", {})
     refs.append(context.get("reference", ""))
     refs.extend(x.get("reference", "") for x in context.get("encounter", []))
+    if resource["resourceType"] == "Appointment":
+        refs.extend(
+            x.get("valueReference", {}).get("reference", "")
+            for x in resource.get("extension", [])
+            if x.get("url") == "urn:codice-tesi:encounter"
+        )
     return {_id(r) for r in refs if r}
 
 
@@ -144,7 +158,20 @@ def _line(resource, by_id, cutoff):
             parts.append("stato nello snapshot=" + resource["status"])
         if resource.get("category"):
             parts.append("categoria=" + "; ".join(_label(c) for c in resource["category"]))
-        for key in ("dosageInstruction", "dosage", "activity", "description", "conclusion", "note"):
+        for key in (
+            "dosageInstruction",
+            "dosage",
+            "activity",
+            "description",
+            "conclusion",
+            "note",
+            "occurrenceDateTime",
+            "occurrencePeriod",
+            "start",
+            "end",
+            "participant",
+            "basedOn",
+        ):
             if resource.get(key):
                 parts.append(key + "=" + _json(resource[key]))
     return " | ".join(p for p in parts if p)
@@ -176,6 +203,9 @@ def load_synthea(path: Path) -> tuple[str, list[tuple[Context, EvidenceSource]]]
     digest = version.hexdigest()
     loaded = []
     for row, file in bundles:
+        enrichment = row.get("synthetic_enrichment")
+        if enrichment not in {None, "dimissione"}:
+            raise ValueError("Tipo di integrazione sintetica non supportata.")
         raw = file.read_bytes()
         if hashlib.sha256(raw).hexdigest() != row["sha256"]:
             raise ValueError("File FHIR modificato durante l'importazione.")
@@ -206,8 +236,14 @@ def load_synthea(path: Path) -> tuple[str, list[tuple[Context, EvidenceSource]]]
             patient_id=patient["id"],
             episode_id=encounter["id"],
             limitations=(
-                "Dati clinici interamente sintetici generati da Synthea; "
-                "nessuna integrazione manuale.",
+                (
+                    "Dati Synthea con decisioni di uscita simulate da regole deterministiche; "
+                    "non sottoposti a validazione clinica. Terapia cronica e posologie "
+                    "derivano dagli ordini Synthea; controlli e prenotazioni sono fittizi."
+                    if enrichment
+                    else "Dati clinici interamente sintetici generati da Synthea; "
+                    "nessuna integrazione manuale."
+                ),
                 "Fonti limitate alla degenza selezionata e disponibili entro la sua fine; "
                 "nessun recupero automatico di pronto soccorso, altri incontri "
                 "o archivio storico/CDR.",
@@ -230,6 +266,7 @@ def load_synthea(path: Path) -> tuple[str, list[tuple[Context, EvidenceSource]]]
                 "serviceProvider",
                 "participant",
                 "hospitalization",
+                "diagnosis",
             )
             if k in encounter
         )
@@ -252,6 +289,17 @@ def load_synthea(path: Path) -> tuple[str, list[tuple[Context, EvidenceSource]]]
             }:
                 continue
             subject = r.get("subject", r.get("patient", {})).get("reference", "")
+            if r["resourceType"] == "Appointment":
+                patients = {
+                    _id(p.get("actor", {}).get("reference", ""))
+                    for p in r.get("participant", [])
+                    if p.get("actor", {}).get("reference", "").startswith("Patient/")
+                    or by_id.get(_id(p.get("actor", {}).get("reference", "")), {}).get(
+                        "resourceType"
+                    )
+                    == "Patient"
+                }
+                subject = patient["id"] if patients == {patient["id"]} else ""
             same_patient = _id(subject) == patient["id"]
             if r["resourceType"] not in EVENT_TYPES or encounter["id"] not in _encounter_refs(r):
                 continue
