@@ -65,9 +65,9 @@ def test_required_histology_headings_cannot_be_omitted_duplicated_or_reordered(
 
 @pytest.mark.parametrize("answer,details", [("No", MISSING_VALUE), ("Sì", "")])
 def test_invalid_histology_preserves_partial_and_fails_application_without_retry(
-    packet_factory, letter_factory, tmp_path, monkeypatch, answer, details
+    packet_factory, letter_factory, response_factory, tmp_path, monkeypatch, answer, details
 ):
-    text = letter_factory(answer=answer, details=details)
+    text = response_factory(letter_factory(answer=answer, details=details))
     calls = []
 
     async def fetch(self, **kwargs):
@@ -87,7 +87,7 @@ def test_invalid_histology_preserves_partial_and_fails_application_without_retry
     monkeypatch.setattr(application, "LLMDraftGenerator", Generator)
     with pytest.raises(ValueError):
         asyncio.run(application.run_application(backend_url="http://test", output_dir=tmp_path))
-    partial = next(tmp_path.rglob("bozza.parziale.txt"))
+    partial = next(tmp_path.rglob("risposta.parziale.json"))
     assert partial.read_text() == text
     assert not (partial.parent / "bozza.txt").exists()
     report = json.loads((partial.parent / "esito.json").read_text())

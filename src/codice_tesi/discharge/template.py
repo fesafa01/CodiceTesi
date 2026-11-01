@@ -9,6 +9,8 @@ from pydantic import Field, model_validator
 
 from codice_tesi.discharge.contracts import Contract
 
+MISSING_VALUE = "Non disponibile nelle note fornite."
+
 
 class Requirement(Contract):
     """Conserva insieme obbligatorietà e motivazione ricavata dai materiali Campus."""

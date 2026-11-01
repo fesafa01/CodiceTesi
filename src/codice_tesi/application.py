@@ -124,7 +124,11 @@ async def run_application(
                     print(f"Richiesta pronta: {artifacts.request}", flush=True)
                     record.finish("prepared")
                     return artifacts.directory
-                print("Redazione in streaming. Ctrl+C conserva il testo parziale.\n", flush=True)
+                print(
+                    "Redazione delle sezioni e citazioni in JSON. "
+                    "Ctrl+C conserva la risposta parziale.\n",
+                    flush=True,
+                )
                 record.data["status"] = "running"
                 record.save()
                 with artifacts.open_draft(
@@ -174,8 +178,10 @@ async def run_application(
                                 pass
                 artifacts.finish("bozza_da_revisionare", usage=generator.usage)
                 record.data["draft_sha256"] = sha256(artifacts.draft.read_bytes()).hexdigest()
+                record.data["artifact_hashes"] = dict(artifacts.report["artefatti_sha256"])
                 record.finish("completed", llm=generator.usage.get("metrics"))
                 print(f"\n\nBozza salvata: {artifacts.draft}", flush=True)
+                print(f"Fonti per sezione: {artifacts.evidences}", flush=True)
                 return artifacts.directory
             except BaseException as exc:
                 interrupted = isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt))

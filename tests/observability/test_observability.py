@@ -170,6 +170,7 @@ def test_trace_and_registry_correlate_without_content_or_duplicate_llm_spans(
     monkeypatch,
     packet_factory,
     letter_factory,
+    response_factory,
 ):
     exporter = InMemorySpanExporter()
     metrics_exporter = MemoryMetrics()
@@ -184,7 +185,7 @@ def test_trace_and_registry_correlate_without_content_or_duplicate_llm_spans(
     class Stream(httpx.AsyncByteStream):
         async def __aiter__(self):
             yield chunk(delta={"reasoning_content": "PRIVATE_REASONING"})
-            yield chunk(delta={"content": letter}, finish="stop")
+            yield chunk(delta={"content": response_factory(letter)}, finish="stop")
             yield chunk(
                 usage={
                     "prompt_tokens": 100,
@@ -336,7 +337,13 @@ def test_export_or_shutdown_failure_does_not_change_local_result(
     "probe_available,model_fails", [(True, False), (False, False), (True, True)]
 )
 def test_hardware_is_correlated_and_failure_does_not_change_generation(
-    tmp_path, monkeypatch, packet_factory, letter_factory, probe_available, model_fails
+    tmp_path,
+    monkeypatch,
+    packet_factory,
+    letter_factory,
+    response_factory,
+    probe_available,
+    model_fails,
 ):
     from datetime import UTC, datetime
 
@@ -378,7 +385,7 @@ def test_hardware_is_correlated_and_failure_does_not_change_generation(
             await asyncio.sleep(0.02)
             if model_fails:
                 raise RuntimeError("PRIVATE_MODEL_ERROR")
-            yield chunk(delta={"content": letter_factory()}, finish="stop")
+            yield chunk(delta={"content": response_factory(letter_factory())}, finish="stop")
             yield b"data: [DONE]\n\n"
 
     monkeypatch.setattr(hardware, "fetch_snapshot", read_hardware)

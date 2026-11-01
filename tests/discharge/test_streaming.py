@@ -1,4 +1,4 @@
-"""Una chiamata HTTP, streaming progressivo su terminale e TXT, interruzioni."""
+"""Una chiamata HTTP, stream JSON progressivo, viste con citazioni e interruzioni."""
 
 import asyncio
 import json
@@ -29,12 +29,13 @@ def sse(text, finish=None):
 
 @pytest.mark.parametrize("thinking", [False, True])
 def test_single_http_call_streams_before_completion_and_flushes_same_file(
-    packet_factory, tmp_path, monkeypatch, capsys, thinking, letter_factory
+    packet_factory, tmp_path, monkeypatch, capsys, thinking, letter_factory, response_factory
 ):
     packet = packet_factory("triage", "anamnesi")
     calls = []
     hidden = "Controllo interno sintetico."
     letter = letter_factory()
+    response = response_factory(letter)
 
     async def fetch(self, **kwargs):
         return packet
@@ -48,9 +49,9 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
                     event = json.loads(sse("").decode().removeprefix("data: "))
                     event["choices"][0]["delta"] = {"reasoning_content": hidden}
                     yield f"data: {json.dumps(event)}\n\n".encode()
-                yield sse(letter[:30])
+                yield sse(response[:30])
                 await release.wait()
-                yield sse(letter[30:], "stop")
+                yield sse(response[30:], "stop")
                 yield b"data: [DONE]\n\n"
 
         def handler(request):
@@ -94,12 +95,12 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
         try:
             async with asyncio.timeout(2):
                 while True:
-                    partials = list(tmp_path.rglob("bozza.parziale.txt"))
-                    if partials and partials[0].read_text() == letter[:30]:
+                    partials = list(tmp_path.rglob("risposta.parziale.json"))
+                    if partials and partials[0].read_text() == response[:30]:
                         break
                     await asyncio.sleep(0.01)
             assert not task.done()
-            assert letter[:30] in capsys.readouterr().out
+            assert response[:30] in capsys.readouterr().out
             release.set()
             directory = await asyncio.wait_for(task, 2)
         finally:
@@ -108,7 +109,7 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
                 with pytest.raises(asyncio.CancelledError):
                     await task
         assert (directory / "bozza.txt").read_text() == letter
-        assert not (directory / "bozza.parziale.txt").exists()
+        assert (directory / "risposta.parziale.json").read_text() == response
         report = json.loads((directory / "esito.json").read_text())
         assert report["richieste_llm_avviate"] == 1 and len(report["campi_previsti"]) == 17
         assert report["stato"] == "bozza_da_revisionare"
@@ -118,7 +119,21 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
             len(hidden) if thinking else 0
         )
         assert hidden not in "\n".join(p.read_text() for p in directory.iterdir())
-        assert {p.name for p in directory.iterdir()} == {"richiesta.txt", "bozza.txt", "esito.json"}
+        assert {p.name for p in directory.iterdir()} == {
+            "richiesta.txt",
+            "catalogo_evidenze.json",
+            "risposta.parziale.json",
+            "bozza_strutturata.json",
+            "evidenze.md",
+            "bozza.txt",
+            "esito.json",
+        }
+        structured = json.loads((directory / "bozza_strutturata.json").read_text())
+        assert structured["binding"]["run_id"] == report["run_id"]
+        assert structured["validation"] == {
+            "technical": "passed",
+            "clinical_review": "not_performed",
+        }
 
     monkeypatch.setattr(application.PacketClient, "fetch", fetch)
     asyncio.run(check())
@@ -318,7 +333,7 @@ def test_timeout_before_first_text_preserves_failure_without_retry(
     monkeypatch.setattr(api, "create_client", create_client)
     with pytest.raises(ModelAPIError, match="timed out"):
         asyncio.run(application.run_application(backend_url="http://test", output_dir=tmp_path))
-    directory = next(tmp_path.rglob("bozza.parziale.txt")).parent
+    directory = next(tmp_path.rglob("risposta.parziale.json")).parent
     report = json.loads((directory / "esito.json").read_text())
     assert len(calls) == 1 and report["stato"] == "fallito"
     assert report["errore_tipo"] == "ModelAPIError"
@@ -328,10 +343,11 @@ def test_timeout_before_first_text_preserves_failure_without_retry(
 
 @pytest.mark.parametrize("finish", ["stop", "length"])
 def test_truncated_response_keeps_partial_and_does_not_retry(
-    packet_factory, tmp_path, monkeypatch, finish, letter_factory
+    packet_factory, tmp_path, monkeypatch, finish, letter_factory, response_factory
 ):
     calls = []
-    text = letter_factory(answer="No") if finish == "stop" else "Testo"
+    letter = letter_factory(answer="No")
+    text = response_factory(letter) if finish == "stop" else "Testo"
 
     async def fetch(self, **kwargs):
         return packet_factory("triage")
@@ -362,12 +378,12 @@ def test_truncated_response_keeps_partial_and_does_not_retry(
 
     if finish == "stop":
         directory = run()
-        assert (directory / "bozza.txt").read_text() == text
+        assert (directory / "bozza.txt").read_text() == letter
     else:
         with pytest.raises(ValueError, match="parziale"):
             run()
-        directory = next(tmp_path.rglob("bozza.parziale.txt")).parent
-        assert (directory / "bozza.parziale.txt").read_text() == "Testo"
+        directory = next(tmp_path.rglob("risposta.parziale.json")).parent
+        assert (directory / "risposta.parziale.json").read_text() == "Testo"
         assert not (directory / "bozza.txt").exists()
     assert len(calls) == 1
 
@@ -387,15 +403,17 @@ def test_error_or_cancellation_keeps_already_written_text(
 
         async def stream(self, request):
             yield "Testo già scritto."
-            assert next(tmp_path.rglob("bozza.parziale.txt")).read_text() == "Testo già scritto."
+            assert (
+                next(tmp_path.rglob("risposta.parziale.json")).read_text() == "Testo già scritto."
+            )
             raise failure()
 
     monkeypatch.setattr(application.PacketClient, "fetch", fetch)
     monkeypatch.setattr(application, "LLMDraftGenerator", Generator)
     with pytest.raises(failure):
         asyncio.run(application.run_application(backend_url="http://test", output_dir=tmp_path))
-    directory = next(tmp_path.rglob("bozza.parziale.txt")).parent
-    assert (directory / "bozza.parziale.txt").read_text() == "Testo già scritto."
+    directory = next(tmp_path.rglob("risposta.parziale.json")).parent
+    assert (directory / "risposta.parziale.json").read_text() == "Testo già scritto."
     assert not (directory / "bozza.txt").exists()
     report = json.loads((directory / "esito.json").read_text())
     assert report["stato"] == ("interrotto" if failure is asyncio.CancelledError else "fallito")
@@ -435,7 +453,11 @@ def test_dry_run_saves_one_exact_request_without_client_or_placeholders(
         application.run_application(backend_url="http://test", output_dir=tmp_path, dry_run=True)
     )
     assert directory.parent == tmp_path / packet.context.id
-    assert {p.name for p in directory.iterdir()} == {"richiesta.txt", "esito.json"}
+    assert {p.name for p in directory.iterdir()} == {
+        "richiesta.txt",
+        "catalogo_evidenze.json",
+        "esito.json",
+    }
     text = (directory / "richiesta.txt").read_text()
     request = prepare_request(packet, ContextConfig(), output_tokens=8192)
     assert text == f"ISTRUZIONI\n\n{request.instructions}\n\nCONTESTO E NOTE\n\n{request.prompt}"

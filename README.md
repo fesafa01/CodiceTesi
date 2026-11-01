@@ -29,7 +29,17 @@ parametri e flag devono essere verificati per ciascun modello/runtime.
 `--dry-run` prepara la richiesta senza inferenza. Gli esiti sono in
 `output/dimissioni/<contesto>/<esecuzione>/`; `output/dimissioni/registro/` contiene
 un record per tentativo, inclusi errori e interruzioni. La validazione riguarda
-forma e campi istologici; il sostegno clinico delle affermazioni resta da valutare.
+schema, riferimenti delle citazioni, forma e campi istologici; il sostegno clinico
+delle affermazioni resta da valutare.
+
+La richiesta unica restituisce le 17 sezioni in JSON con le fonti citate. Il codice
+produce `bozza.txt`, `bozza_strutturata.json` ed `evidenze.md`, dove ogni sezione è
+affiancata alle fonti selezionate dal modello, con origine, versione ed estratti
+originali. In questa prima versione ogni evidenza copre una fonte completa. Il
+catalogo è salvato prima dell'inferenza in `catalogo_evidenze.json`; lo stream
+grezzo rimane in `risposta.parziale.json`, anche a completamento riuscito.
+Riferimenti sconosciuti o incoerenti fanno fallire il controllo, conservando la
+risposta grezza. Le citazioni sono per sezione e non certificano tutte le frasi.
 
 Il template è `campus-discharge` 1.1.0: con istologico **No**, i dettagli restano
 vuoti; se la risposta manca nelle fonti, viene segnalata la lacuna senza dedurre No.
@@ -90,8 +100,8 @@ negli artefatti locali e non sono esportati nelle tracce previste.
   stato della verifica remota; attivazione sullo Spark ancora necessaria.
 - [Sovranità](docs/sovranita.md): protocollo, accessi, conservazione e prove aperte.
 - [Verifiche svolte](docs/verifiche-sovranita.md): risultati sintetici e perimetro.
-- [Tracciabilità per sezione](docs/tracciabilita.md): contratto proposto e
-  [esempio JSON](docs/tracciabilita.esempio.json), non ancora integrati nella generazione.
+- [Tracciabilità per sezione](docs/tracciabilita.md): contratto implementato, controlli
+  e limiti; [esempio JSON didattico](docs/tracciabilita.esempio.json).
 
 Log grezzi, richieste, copie e precedenti documenti generati sono conservati sotto
 `output/`, esclusi da Git e dalle immagini. I verificatori accettano destinazioni

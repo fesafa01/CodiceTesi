@@ -3,11 +3,11 @@
 from dataclasses import dataclass
 
 from codice_tesi.discharge.models import CompositionPacket
+from codice_tesi.discharge.provenance import EvidenceCatalog, build_catalog
+from codice_tesi.discharge.template import MISSING_VALUE as MISSING_VALUE
 from codice_tesi.discharge.template import LetterTemplate
 
-PROMPT_VERSION = "campus-stesura-v13"
-
-MISSING_VALUE = "Non disponibile nelle note fornite."
+PROMPT_VERSION = "campus-stesura-v14-citazioni"
 
 INSTRUCTIONS = """# Priorità operative
 Applica queste priorità nell'ordine:
@@ -93,11 +93,30 @@ commenti sul prompt, sul dataset o sulla generazione. Se il contesto non è un
 episodio verificato, indica brevemente il limite nella sezione identificativa.
 
 # Formato della risposta
-Inizia con BOZZA DI LETTERA DI DIMISSIONE - DA REVISIONARE.
-Usa le 17 intestazioni numerate della guida, copiate esattamente e nell'ordine
-fornito, ciascuna una sola volta. Non aggiungere o rinominare sezioni.
-Produci soltanto la lettera in testo semplice, senza JSON, Markdown, premesse,
-commenti finali o ragionamento visibile.
+Produci soltanto un oggetto JSON valido con la chiave sections, senza Markdown,
+premesse, commenti o ragionamento visibile. Includi tutte le 17 sezioni una sola
+volta e nell'ordine della guida, anche se vuote. Ogni sezione contiene soltanto:
+section_id (ID canonico indicato nella guida), text (testo senza intestazione),
+sources (elenco di oggetti con source_id ed evidence_ids).
+Esempio di una singola sezione, da completare con le altre sezioni della guida:
+{"sections":[{"section_id":"esami_laboratorio","text":"Testo della sezione.",
+"sources":[{"source_id":"ID_FONTE_ESISTENTE","evidence_ids":["ID_EVIDENZA_ESISTENTE"]}]}]}
+Il software aggiunge titolo e intestazioni: non inserirli nel testo delle sezioni.
+
+# Citazioni delle fonti
+Per ogni sezione con fatti documentati cita le evidenze pertinenti del catalogo.
+Scegli solo source_id ed evidence_ids esistenti e associati fra loro; non inventare
+identificativi, estratti, origini, offset o hash. Non duplicare fonti nella stessa
+sezione né evidenze nella stessa citazione. Ogni citazione ha almeno una evidenza.
+Puoi citare la stessa fonte in sezioni diverse. Una evidenza inizialmente copre
+la fonte completa: citarla non prova da solo che sostenga tutte le frasi.
+Anche gli identificativi del contesto verificato hanno una fonte tecnica citabile.
+Conserva le lacune specifiche nei testi parzialmente documentati e cita i dati
+disponibili. Se il testo è interamente la formula del dato mancante o è vuoto,
+sources deve essere []. Non inventare una fonte che dimostri un dato mancante.
+Un No esplicitamente documentato richiede invece la relativa evidenza. Se segnali
+una discordanza, cita entrambe le fonti. Le citazioni propongono un supporto
+documentale: non dichiarare che il testo sia clinicamente validato.
 """
 
 
@@ -273,6 +292,7 @@ def build_instructions(template: LetterTemplate) -> str:
                     "conditional": "subordinato alla condizione indicata",
                 }[section.requirement.status]
                 + ".",
+                f"ID canonico: {section.id}",
                 "Scopo: " + guidance.purpose,
                 "Contenuto: " + _text_rule(section.instruction),
                 "Dati da utilizzare, se disponibili: "
@@ -298,28 +318,25 @@ def build_instructions(template: LetterTemplate) -> str:
     return "\n".join(lines)
 
 
-def build_prompt(packet: CompositionPacket) -> str:
+def build_prompt(packet: CompositionPacket, catalog: EvidenceCatalog | None = None) -> str:
     """Separa il contesto e le fonti dalle istruzioni, inserendo ogni fonte una sola volta."""
-    context = packet.context
+    catalog = catalog or build_catalog(packet)
     lines = [
-        "CONTESTO VERIFICATO",
-        f"Ambito: {context.scope}",
-        f"Identificativo paziente: {context.patient_id or 'non disponibile'}",
-        f"Identificativo episodio: {context.episode_id or 'non disponibile'}",
-        *context.limitations,
-        "",
-        "FONTI DELLA DEGENZA SELEZIONATA",
+        "CATALOGO DELLE FONTI E DEL CONTESTO VERIFICATO",
+        "Ogni evidenza seguente copre l'intero testo della rispettiva fonte.",
     ]
-    for source in packet.sources:
+    for source in catalog.sources:
         lines.extend(
             [
                 f"INIZIO NOTA {source.id} (tipo: {source.kind})",
+                "Evidenze citabili: "
+                + ", ".join(e.id for e in catalog.evidences if e.source_id == source.id),
                 source.text,
                 f"FINE NOTA {source.id}",
             ]
         )
     lines.append(
-        "Redigi ora soltanto la bozza nelle 17 sezioni richieste, applicando la guida "
+        "Restituisci ora soltanto il JSON delle 17 sezioni con le citazioni, applicando la guida "
         "di ciascuna sezione. Sviluppa in prosa il percorso documentato; nel laboratorio "
         "riporta una sola volta l'ultimo risultato disponibile per ciascun esame, con "
         "la sua data. Astieniti dall'inventare terapie, decorsi o indicazioni mancanti."

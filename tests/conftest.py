@@ -1,12 +1,36 @@
 """Fixture neutre: template Campus reale, episodi verificati e risposte simulabili."""
 
 import hashlib
+import json
 
 import pytest
 
 from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
 from codice_tesi.discharge.prompts import MISSING_VALUE
 from codice_tesi.discharge.template import load_template
+
+
+@pytest.fixture
+def response_factory():
+    """Serializza le lettere di fixture con riferimenti al catalogo di packet_factory."""
+
+    def create(letter):
+        template = load_template()
+        headings = [f"{i}. {section.title}\n" for i, section in enumerate(template.sections, 1)]
+        sections = []
+        for index, (section, heading) in enumerate(zip(template.sections, headings, strict=True)):
+            start = letter.index(heading) + len(heading)
+            end = letter.index(headings[index + 1]) if index + 1 < len(headings) else len(letter)
+            text = letter[start:end].strip()
+            sources = (
+                [{"source_id": "source-0", "evidence_ids": ["evidenza-0001"]}]
+                if text and text != MISSING_VALUE
+                else []
+            )
+            sections.append({"section_id": section.id, "text": text, "sources": sources})
+        return json.dumps({"sections": sections}, ensure_ascii=False, indent=2)
+
+    return create
 
 
 @pytest.fixture
