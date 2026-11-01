@@ -16,6 +16,8 @@ services:
       TELEMETRY_ENABLED: "true"
       TELEMETRY_ENDPOINT: http://otel-collector:4318
       TELEMETRY_PROJECT: tesi-dimissioni
+      HARDWARE_ENABLED: ${HARDWARE_ENABLED:-true}
+      HARDWARE_ENDPOINT: ${HARDWARE_ENDPOINT:-http://spark-413e.tail9c981a.ts.net:9401}
     volumes:
       - ./output:/app/output
       - ./experiments:/app/experiments:ro

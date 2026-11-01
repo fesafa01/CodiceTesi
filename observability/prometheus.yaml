@@ -6,3 +6,8 @@ scrape_configs:
   - job_name: codice-tesi
     static_configs:
       - targets: [otel-collector:8889]
+  - job_name: spark-hardware
+    scrape_interval: 5s
+    scrape_timeout: 3s
+    static_configs:
+      - targets: [spark-413e.tail9c981a.ts.net:9401]

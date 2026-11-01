@@ -38,6 +38,10 @@ def test_registry_correlates_artifacts_and_exports_without_clinical_text(
     stored = json.loads(record.path.read_text())
     assert stored["status"] == "prepared" and stored["llm"] is None
     assert stored["request_sha256"] and stored["packet_sha256"]
+    assert stored["input_estimate_method"] == request.input_estimate_method
+    assert stored["input_tokenizer_revision"] == request.input_tokenizer_revision
+    assert artifacts.report["input_estimate_method"] == request.input_estimate_method
+    assert artifacts.report["input_tokenizer_revision"] == request.input_tokenizer_revision
     assert stored["experiment"]["model_revision"] is None
     assert "PRIVATE_SOURCE_TEXT" not in record.path.read_text()
     assert (

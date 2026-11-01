@@ -1,10 +1,14 @@
-"""Tutti i campi nelle istruzioni e tutte le note una sola volta nel prompt."""
+"""Tutti i campi e le note nel prompt, con controllo del budget prima dell'inferenza."""
+
+import json
 
 import pytest
 
+from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.prompts import build_instructions, build_prompt
+from codice_tesi.discharge.token_count import TOKENIZER_REVISION, estimate_input_tokens
 
 
 def test_all_campus_sections_and_subfields_are_in_instructions_in_order(packet_factory):
@@ -51,3 +55,72 @@ def test_request_rejects_context_budget_before_inference_without_truncating_note
     packet = packet_factory("anamnesi", text="Fonte ampia. " * 10000)
     with pytest.raises(ValueError, match="Nessuna nota è stata troncata"):
         prepare_request(packet, ContextConfig(window_tokens=32768), output_tokens=8192)
+
+
+def test_long_italian_notes_fit_with_tokenizer_and_are_preserved_in_full(packet_factory):
+    text = "Paziente vigile, orientato. Non riferisce dolore. Temperatura 36,5 °C.\n" * 1600
+    packet = packet_factory("diario", text=text)
+    config, model = ContextConfig(), ModelConfig()
+    request = prepare_request(packet, config, output_tokens=model.max_tokens, model_config=model)
+    messages = [
+        {"role": "system", "content": request.instructions},
+        {"role": "user", "content": request.prompt},
+    ]
+    old_estimate = len(json.dumps(messages, ensure_ascii=False).encode("utf-8")) + 512
+    assert old_estimate + model.max_tokens + config.safety_margin_tokens > config.window_tokens
+    assert (
+        request.input_tokens_estimate + model.max_tokens + config.safety_margin_tokens
+        <= config.window_tokens
+    )
+    assert text in request.prompt
+    assert request.input_estimate_method == "deepseek_v4_local_chat_template_v1"
+    assert request.input_tokenizer_revision == TOKENIZER_REVISION
+
+
+def test_budget_reserves_full_output_and_safety_margin_at_exact_boundary(packet_factory):
+    packet = packet_factory("diario", text="Sintesi clinica con caratteri accentati: è vigile.")
+    output, margin = 32768, 1024
+    request = prepare_request(packet, ContextConfig(), output_tokens=output)
+    required = request.input_tokens_estimate + output + margin
+    assert (
+        prepare_request(packet, ContextConfig(window_tokens=required), output_tokens=output)
+        == request
+    )
+    with pytest.raises(ValueError, match="Nessuna nota è stata troncata"):
+        prepare_request(packet, ContextConfig(window_tokens=required - 1), output_tokens=output)
+
+
+@pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-v4-pro"])
+@pytest.mark.parametrize(
+    "thinking,effort,expected",
+    [(False, "low", 25), (True, "low", 25), (True, "max", 104), (False, "max", 25)],
+)
+def test_official_encoding_reference_counts_include_chat_and_reasoning_prefixes(
+    model, thinking, effort, expected
+):
+    # Conteggi di riferimento ottenuti con encoding_dsv4.py della revisione inclusa.
+    estimate = estimate_input_tokens(
+        "Sei un assistente.",
+        "Febbre: 38,5 °C. Paziente vigile.",
+        ModelConfig(model=model, thinking=thinking, reasoning_effort=effort),
+    )
+    assert estimate.tokens == expected
+    assert estimate.tokenizer_revision == TOKENIZER_REVISION
+
+
+def test_other_models_keep_explicit_conservative_fallback(packet_factory):
+    request = prepare_request(
+        packet_factory("diario"),
+        ContextConfig(),
+        output_tokens=512,
+        model_config=ModelConfig(model="other-model"),
+    )
+    messages = [
+        {"role": "system", "content": request.instructions},
+        {"role": "user", "content": request.prompt},
+    ]
+    assert request.input_tokens_estimate == (
+        len(json.dumps(messages, ensure_ascii=False).encode("utf-8")) + 512
+    )
+    assert request.input_estimate_method == "utf8_json_bytes_plus_512_not_tokenizer_count"
+    assert request.input_tokenizer_revision is None

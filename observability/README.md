@@ -14,11 +14,15 @@ observability/
   prometheus.yaml    # Scrape delle metriche
   .env.example       # Configurazione pubblica per il client sul Mac
   .env               # Configurazione locale esclusa da Git e immagini
+  hardware.env.example # Configurazione della sonda Spark, separata da OTLP
+  HARDWARE.md        # Sensori, attivazione sullo Spark e limiti di attribuzione
   README.md          # Uso, definizioni delle misure e limiti
 src/codice_tesi/observability/
   execution.py       # Registro atomico, manifest ed esportazione CSV/JSONL
   stream_metrics.py  # Osservazioni dello stream, senza conservarne i testi
   telemetry.py       # Configurazione ed export OpenTelemetry
+  hardware.py        # Campioni remoti e riepilogo per richiesta LLM
+  hardware_probe.py  # Sonda Linux autonoma da eseguire sullo Spark
 tests/observability/ # Test del registro, delle misure e dell'isolamento dei dati
 ```
 
@@ -28,6 +32,13 @@ restano quelli esistenti. Non avviare il Compose incluso come progetto separato.
 Sono richiesti Docker Compose con supporto a `include` (2.20.0 o successivo).
 L'applicazione mantiene soltanto i collegamenti al Collector e ai moduli Python.
 Il registro resta disponibile anche quando l'export è disabilitato.
+
+La raccolta delle risorse dello Spark usa una sonda separata, ancora da attivare
+sulla macchina remota. Il campo `hardware` del registro e gli attributi Phoenix
+distinguono misure disponibili, parziali e assenti. Vedere [hardware Spark](HARDWARE.md)
+per lo stato della verifica e i passaggi da eseguire sullo Spark. Il perimetro
+essenziale comprende CPU, memoria condivisa, swap, disco, utilizzo/temperatura/clock
+grafico GPU; esclude framebuffer dedicato, potenza, energia e costi.
 
 ## Architettura
 
@@ -39,6 +50,8 @@ flowchart LR
     PX --> PDB[(PostgreSQL dedicato)]
     COL -->|Metriche aggregate| EXP[Endpoint Prometheus interno]
     PROM[Prometheus] -->|scrape ogni 5 s| EXP
+    PROM -->|scrape ogni 5 s, quando attiva| HW[Sonda hardware Spark]
+    APP -->|snapshot durante la richiesta LLM| HW
 ```
 
 Servizi definiti in `observability/compose.yaml`, incluso dal Compose principale:
@@ -137,8 +150,15 @@ attribuisce allo Spark le caratteristiche del Mac o del container client.
 `source_sha256` identifica i sorgenti e i template installati, non un commit Git.
 Nell’installazione il manifest segue i file dichiarati nel pacchetto distribuito,
 escludendo eventuali copie residue non appartenenti alla distribuzione.
-La stima prudenziale di input usata dal controllo del contesto è registrata come
-stima in byte UTF-8 con margine; non è il numero di token del tokenizer del modello.
+Per `deepseek-v4-flash` e `deepseek-v4-pro`, il controllo del contesto usa il tokenizer
+ufficiale DeepSeek V4 incluso nel pacchetto e il template testuale system/user/assistant
+di DS4, con la modalità thinking richiesta. Il conteggio è locale e funziona offline.
+Metodo e revisione del tokenizer sono registrati in `input_estimate_method` e
+`input_tokenizer_revision`, anche negli esiti. È una stima del prompt del runtime:
+il conteggio effettivo resta quello restituito dal server. Il controllo riserva
+l'intero limite di output e il margine di sicurezza di 1.024 token entro il budget
+di 100.000 token. Per ID di modelli diversi resta la stima prudenziale in byte UTF-8
+più 512, segnalata esplicitamente nel metodo; non viene applicato il tokenizer DeepSeek.
 
 Scrittura atomica per ogni record e nessun file CSV condiviso in append: processi
 concorrenti scrivono UUID distinti. Il checkpoint ogni 15 secondi aggiorna lo stato
@@ -193,8 +213,9 @@ adattatore dedicato; le incongruenze rilevate sono in `usage_issues`.
 
 Queste misure comprendono effetti di rete e consumo dello stream da parte del
 client, inclusi flush del file e stampa. La velocità client non è la velocità pura
-di decode del motore. Coda, prefill, TTFT server, memoria GPU, potenza ed energia
-richiedono osservazioni del serving/hardware sullo Spark, attualmente non attestate.
+di decode del motore. Coda, prefill e TTFT server richiedono osservazioni del
+serving attualmente non attestate. La sonda hardware raccoglie risorse dell’host;
+non misura memoria esclusiva del modello, potenza o energia.
 Token/s e budget di token vanno interpretati insieme a tokenizer, configurazione,
 lunghezza della risposta e qualità, senza equiparare tokenizer diversi.
 

@@ -17,15 +17,17 @@ from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.generator import LLMDraftGenerator
 from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfig
+from codice_tesi.observability.hardware import HardwareConfig, HardwareObservation
 from codice_tesi.observability.telemetry import Telemetry, TelemetryConfig
 
 
-async def _record_progress(generator, artifacts, record):
+async def _record_progress(generator, artifacts, record, hardware):
     while True:
         await asyncio.sleep(15)
         progress = dict(generator.progress)
         artifacts.finish("in_corso", usage={"stream": progress})
         record.data["stream_progress"] = progress
+        record.data["hardware"] = hardware.summary()
         record.save()
 
 
@@ -41,6 +43,7 @@ async def run_application(
     context_config: ContextConfig | None = None,
     experiment: ExperimentConfig | None = None,
     telemetry_config: TelemetryConfig | None = None,
+    hardware_config: HardwareConfig | None = None,
 ) -> Path:
     config = config or ModelConfig()
     context_config = context_config or ContextConfig()
@@ -53,6 +56,10 @@ async def run_application(
         dry_run=dry_run,
     )
     telemetry = Telemetry(telemetry_config)
+    hardware = HardwareObservation(
+        hardware_config or HardwareConfig(), output_dir, record.data["run_id"]
+    )
+    record.data["hardware"] = hardware.summary()
     artifacts = generator = None
     try:
         with telemetry.span(
@@ -86,7 +93,10 @@ async def run_application(
                     )
                 with telemetry.stage(record, "prepare_request"):
                     request = prepare_request(
-                        packet, context_config, output_tokens=config.max_tokens
+                        packet,
+                        context_config,
+                        output_tokens=config.max_tokens,
+                        model_config=config,
                     )
                 with telemetry.stage(record, "save_prepared_request"):
                     artifacts = RunArtifacts(
@@ -124,7 +134,7 @@ async def run_application(
                         generator = LLMDraftGenerator(config, client)
                         artifacts.start()
                         progress_task = asyncio.create_task(
-                            _record_progress(generator, artifacts, record)
+                            _record_progress(generator, artifacts, record, hardware)
                         )
                         try:
                             with telemetry.stage(record, "generate_draft"):
@@ -142,12 +152,16 @@ async def run_application(
                                     },
                                 ) as llm_span:
                                     try:
+                                        hardware.start()
                                         async with aclosing(generator.stream(request)) as chunks:
                                             async for chunk in chunks:
                                                 output.write(chunk)
                                                 output.flush()
                                                 print(chunk, end="", flush=True)
                                     finally:
+                                        await hardware.stop()
+                                        record.data["hardware"] = hardware.summary()
+                                        llm_span.set_attributes(hardware.span_attributes())
                                         metrics = generator.usage.get("metrics", {})
                                         llm_span.set_attributes(
                                             telemetry.llm_attributes(record, metrics)
@@ -183,6 +197,7 @@ async def run_application(
                 raise
             finally:
                 root.set_attribute("tesi.status", record.data["status"])
+                root.set_attributes(hardware.span_attributes())
                 telemetry.record_metrics(record)
     finally:
         record.data["telemetry"] = telemetry.close()

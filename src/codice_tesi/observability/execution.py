@@ -72,6 +72,7 @@ def software_manifest():
         "pydantic-ai-slim",
         "pydantic",
         "openai",
+        "tokenizers",
         "opentelemetry-api",
         "opentelemetry-sdk",
         "opentelemetry-exporter-otlp-proto-http",
@@ -136,7 +137,8 @@ class ExecutionRecord:
                 "prompt_version": artifacts.report["prompt_version"],
                 "source_count": len(packet.sources),
                 "input_tokens_estimate": request.input_tokens_estimate,
-                "input_estimate_method": "utf8_json_bytes_plus_512_not_tokenizer_count",
+                "input_estimate_method": request.input_estimate_method,
+                "input_tokenizer_revision": request.input_tokenizer_revision,
                 "context_config": context_config.model_dump(mode="json"),
                 "artifact_directory": str(artifacts.directory),
             }

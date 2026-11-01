@@ -86,8 +86,12 @@ da `observability/.env.example` senza sovrascrivere impostazioni esistenti.
 negli artefatti locali e non sono esportati nelle tracce previste.
 
 - [Osservabilità](observability/README.md): componenti, misure, uso e limiti.
+- [Hardware Spark](observability/HARDWARE.md): sonda, integrazione per esecuzione e
+  stato della verifica remota; attivazione sullo Spark ancora necessaria.
 - [Sovranità](docs/sovranita.md): protocollo, accessi, conservazione e prove aperte.
 - [Verifiche svolte](docs/verifiche-sovranita.md): risultati sintetici e perimetro.
+- [Tracciabilità per sezione](docs/tracciabilita.md): contratto proposto e
+  [esempio JSON](docs/tracciabilita.esempio.json), non ancora integrati nella generazione.
 
 Log grezzi, richieste, copie e precedenti documenti generati sono conservati sotto
 `output/`, esclusi da Git e dalle immagini. I verificatori accettano destinazioni

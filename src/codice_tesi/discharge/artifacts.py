@@ -64,6 +64,8 @@ class RunArtifacts:
             "richieste_llm_avviate": 0,
             "campi_previsti": [section.id for section in packet.template.sections],
             "input_tokens_stimati": request.input_tokens_estimate,
+            "input_estimate_method": request.input_estimate_method,
+            "input_tokenizer_revision": request.input_tokenizer_revision,
             "fonti": [s.model_dump(mode="json", exclude={"text"}) for s in packet.sources],
         }
         self.finish("preparato")
