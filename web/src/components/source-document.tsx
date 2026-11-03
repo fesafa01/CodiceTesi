@@ -24,6 +24,7 @@ type Props = {
 	evidences: Evidence[];
 	documentURL?: string;
 	onClose?: () => void;
+    focusEvidenceId?: string;
 };
 
 function Value({ value, depth = 0 }: { value: JsonValue; depth?: number }) {
@@ -87,6 +88,7 @@ export function SourceDocument({
 	evidences,
 	documentURL,
 	onClose,
+    focusEvidenceId,
 }: Props) {
 	const [view, setView] = useState<"read" | "original" | "json">("read");
 	const [query, setQuery] = useState("");
@@ -95,6 +97,7 @@ export function SourceDocument({
 		block.raw.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
 	);
 	const payload = { source, evidences };
+    const focus = evidences.find((e) => e.id === focusEvidenceId);
 	function download() {
 		const url = URL.createObjectURL(
 			new Blob([JSON.stringify(payload, null, 2)], {
@@ -200,6 +203,11 @@ export function SourceDocument({
 				)}
 			</div>
 			<div className="source-reader-body">
+                {focus && <aside className="focused-evidence">
+                    <h3>Passaggio richiamato</h3>
+                    <blockquote>{Array.from(source.text).slice(focus.start, focus.end).join("")}</blockquote>
+                    <small>{focus.id}</small>
+                </aside>}
 				{view === "read" && (
 					<>
 						<p className="reader-caption">

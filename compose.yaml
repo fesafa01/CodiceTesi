@@ -4,6 +4,8 @@ include:
 services:
   app:
     image: codice-tesi:local
+    # Il client CLI esegue una generazione e deve partire solo su richiesta.
+    profiles: ["cli"]
     build: .
     init: true
     env_file:

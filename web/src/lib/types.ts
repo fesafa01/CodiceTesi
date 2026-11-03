@@ -23,6 +23,12 @@ export type Evidence = {
 	end: number;
 };
 export type Catalog = { sources: Source[]; evidences: Evidence[] };
+export type FactInventory = {
+    facts: { id: string; source_id: string; evidence_id: string; kind: string;
+        label: string; event_time: string | null; status: string | null;
+        attributes: Record<string, unknown> }[];
+    issues: { code: string; message: string; fact_ids: string[]; evidence_ids: string[] }[];
+};
 export type Section = {
 	id: string;
 	title: string;
@@ -51,15 +57,31 @@ export type Result = {
 	catalog: Catalog;
 	draft: { sections: DraftSection[] };
 	validation: { technical: string; clinical_review: string };
+    facts?: FactInventory;
+};
+export type Editor = {
+    revision: number;
+    sections: Record<string, string>;
+    updated_at?: string;
+};
+export type Preview = {
+    response_revision: number;
+    sections: { section_id: string; text: string }[];
 };
 export type Job = {
 	id: string;
 	context_id: string;
-	status: "prepared" | "running" | "completed" | "failed" | "interrupted";
+	status: "prepared" | "running" | "cancelling" | "completed" | "failed" | "interrupted";
+    run_id?: string;
+    started_at?: string;
+    options?: { thinking: boolean; tools_enabled: boolean; timeout_seconds: number | null };
+    phase?: string;
+    progress?: { durata_secondi?: number; caratteri_testo?: number; tool_calls?: number };
 	detail?: string;
 	result?: Result;
+    preview?: Preview;
 };
-export type Preparation = Job & { packet: Packet; catalog: Catalog };
+export type Preparation = Job & { packet: Packet; catalog: Catalog; facts?: FactInventory; editor?: Editor };
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 	const response = await fetch(`/api/${path}`, { ...init, cache: "no-store" });

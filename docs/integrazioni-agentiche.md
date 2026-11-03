@@ -4,7 +4,7 @@ Il percorso ordinario redige una bozza con una sola richiesta al modello.
 I tool opzionali elaborano lo stesso snapshot autorizzato, con
 budget complessivi e tracciamento dei tentativi.
 
-Per l'interfaccia web vedere [web/README.md](../web/README.md).
+Per editor, streaming e uso dell'interfaccia vedere [web/README.md](../web/README.md).
 Per avvio, CLI e configurazione vedere il [README principale](../README.md).
 I valori predefiniti sono definiti in `src/codice_tesi/config.py` e salvati nel
 registro di ogni esecuzione, senza duplicarli in questa guida.
@@ -110,7 +110,10 @@ replicarne le origini estese.
   LLM e riepiloghi AGENT, senza import di moduli del dominio;
 - `generator.py`: ciclo del modello, streaming e budget complessivi.
 
-Le elaborazioni non introducono librerie aggiuntive. I controlli di forma e dei
+L’autenticazione HTTP condivisa è in `http_auth.py`: l’API di generazione non
+importa il backend SQL. L’extra `web` e la relativa immagine includono soltanto
+FastAPI/Uvicorn oltre al nucleo applicativo; i driver PostgreSQL restano
+nell’extra `backend`. Non sono state aggiunte librerie. I controlli di forma e dei
 riferimenti sulla bozza restano automatici, indipendenti dalla scelta dei tool;
 non attestano il supporto semantico di ogni frase clinica.
 
@@ -130,6 +133,10 @@ modello (`tools.attempts`, con nome autorizzato e `args_valid`). I nomi sconosci
 sono sostituiti con un'etichetta tecnica; gli argomenti non vengono registrati.
 I rifiuti di validazione producono span Phoenix `TOOL` con stato `rejected` e
 indice del tentativo, senza input o messaggi di errore contenenti dati.
+La UI distingue `tool_call_invalid`, `model_protocol_error` e `model_usage_limit`
+dagli errori di inattività o durata totale. Il messaggio generico rimane solo
+per errori non classificati.
+
 La storia viene stimata nuovamente prima di ogni richiesta, con riserva per gli
 schemi dei tool, output e margine; se eccede il budget, il lavoro si arresta.
 Il massimo output viene ridotto quando necessario in base al budget aggregato
@@ -161,12 +168,18 @@ restituiti al modello come feedback entro la medesima correzione consentita.
 
 ## Stato, risultati e misure
 
+L'API aggiunge `POST /api/v1/preparazioni/{id}/interrompi`; applica gli stessi
+controlli di accesso delle altre operazioni. Gli stati includono `cancelling`.
+Lo stato persistito contiene run ID, fase, avvio, aggiornamento e progressi
+numerici. La seconda richiesta di arresto è idempotente. Un lavoro interrotto
+rimane terminale: per riprovare occorre una nuova preparazione.
+
 Il contratto di risultato è `1.1`, con `facts`; il lettore accetta anche i risultati
 `1.0` senza inventario. Lo stato clinico resta `not_performed`. I riferimenti dei
 fatti e dei rilievi devono appartenere al catalogo del risultato.
 
 La risposta può essere JSON grezzo oppure un solo blocco Markdown `json`, senza
-prosa esterna. L'involucro è gestito conservando i byte
+prosa esterna. L'involucro è gestito anche nell'anteprima, conservando i byte
 originali negli artefatti. Non vengono corretti chiavi duplicate, sezioni o
 riferimenti non validi. Una sezione priva di dati può usare la formula canonica
 oppure elencare tutti i campi del template come `non disponibile`; un valore o
@@ -189,14 +202,26 @@ non vengono aggiunti alle tracce esportate.
 ## Verifica e diagnosi
 
 ```bash
-PYTHONPATH=src uv run --locked --extra backend pytest tests/discharge tests/observability tests/test_api.py -q
+PYTHONPATH=src uv run --locked --extra backend pytest tests/discharge tests/web_api -q
 uv run --locked ruff check src tests
 ```
 
 I test simulano errori e correzioni dei tool, metadati estesi, limiti di budget,
 streaming e salvataggio. Non sostituiscono il collaudo del serving reale.
 
-Il rilascio effettivo delle risorse sullo Spark dopo un'interruzione va verificato
+| Codice pubblico | Significato |
+|---|---|
+| `model_inactivity_timeout` | Nessun progresso prima del testo entro l'intervallo configurato |
+| `total_timeout` | Raggiunto un limite totale richiesto esplicitamente |
+| `tool_call_invalid` | Nome o parametri del tool rifiutati, senza ulteriori correzioni disponibili |
+| `tool_call_after_final` | Tool richiesto dopo la chiusura delle letture; arresto senza nuova inferenza |
+| `tool_read_*` | Lettura fuori catalogo, oltre il budget o altro errore documentale atteso |
+| `model_protocol_error` | Risposta del modello non utilizzabile |
+| `model_usage_limit` | Esaurito un budget di richieste, tool, contesto o token |
+
+Il limite di un lavoro web per processo non coordina le richieste avviate da CLI.
+Il servizio `app` appartiene al profilo Compose `cli` e parte solo su richiesta.
+Dopo un'interruzione il rilascio effettivo delle risorse sullo Spark va verificato
 sul serving; la chiusura client non lo attesta.
 
 Dopo modifiche al codice ricostruire i servizi prima di verificarli:

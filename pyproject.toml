@@ -22,6 +22,10 @@ tesi-agent = "codice_tesi.main:main"
 tesi-backend = "codice_tesi.backend.cli:main"
 
 [project.optional-dependencies]
+web = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+]
 backend = [
     "fastapi>=0.115,<1",
     "psycopg[binary]>=3.2,<4",

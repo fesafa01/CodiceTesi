@@ -3,6 +3,7 @@ import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { SourceDocument } from "@/components/source-document";
 import { sourceTitle } from "@/lib/source-reader";
+import { letterText, sameEdits, sectionText } from "@/lib/letter-editor";
 import {
 	FiArrowLeft,
 	FiArrowUpRight,
@@ -11,6 +12,7 @@ import {
 	FiDownload,
 	FiFileText,
 	FiLoader,
+	FiSave,
 } from "react-icons/fi";
 import {
 	api,
@@ -18,6 +20,7 @@ import {
 	type Preparation,
 	type Source,
 	type DraftSection,
+    type Editor,
 } from "@/lib/types";
 
 const requirementLabels = {
@@ -25,6 +28,14 @@ const requirementLabels = {
 	optional: "Facoltativo",
 	unconfirmed: "Da confermare",
 	conditional: "Condizionale",
+};
+const phaseLabels: Record<string, string> = {
+    avvio: "Avvio della generazione", preparazione: "Preparazione delle fonti",
+    attesa_risposta: "Attesa della risposta", ragionamento: "Elaborazione delle fonti",
+    redazione: "Stesura della bozza", lettura_fonti: "Verifiche sui dati documentati",
+    correzione_tool: "Verifica dei parametri del tool",
+    redazione_finale: "Preparazione della stesura finale con le fonti disponibili",
+    controllo_risultato: "Controllo del risultato", completata: "Bozza pronta",
 };
 export default function LetterPage({
 	params,
@@ -37,7 +48,17 @@ export default function LetterPage({
 	const [error, setError] = useState("");
 	const [active, setActive] = useState("");
 	const [starting, setStarting] = useState(false);
+    const [thinking, setThinking] = useState(true);
+    const [toolsEnabled, setToolsEnabled] = useState(false);
+    const [elapsed, setElapsed] = useState(0);
+    const [edits, setEdits] = useState<Record<string, string>>({});
+    const [savedEditor, setSavedEditor] = useState<Editor>({ revision: 0, sections: {} });
+    const [saving, setSaving] = useState(false);
+    const [streamConnected, setStreamConnected] = useState(false);
+    const [connectionError, setConnectionError] = useState("");
+    const dirty = !sameEdits(edits, savedEditor.sections);
 	const [source, setSource] = useState<Source>();
+    const [focusEvidenceId, setFocusEvidenceId] = useState<string>();
 	const dialog = useRef<HTMLDialogElement>(null);
 	useEffect(() => {
 		let disposed = false;
@@ -46,6 +67,13 @@ export default function LetterPage({
 				if (disposed) return;
 				setPreparation(data);
 				setJob(data);
+                const editor = data.editor ?? { revision: 0, sections: {} };
+                setSavedEditor(editor);
+                setEdits(editor.sections);
+                if (data.options) {
+                    setThinking(data.options.thinking ?? true);
+                    setToolsEnabled(data.options.tools_enabled);
+                }
 				setActive(data.packet.template.sections[0].id);
 			})
 			.catch((e) => {
@@ -56,20 +84,45 @@ export default function LetterPage({
 		};
 	}, [id]);
 	useEffect(() => {
-		if (!job || !["running", "completed"].includes(job.status) || job.result)
+		if (!job || !["running", "cancelling", "completed"].includes(job.status) || job.result)
 			return;
 		let disposed = false;
+		let streamAvailable = false;
 		let timer: ReturnType<typeof setTimeout>;
+        const stream = new EventSource(`/api/preparazioni/${id}/stream`);
+        stream.onopen = () => {
+            if (disposed) return;
+            streamAvailable = true;
+            setStreamConnected(true);
+            setConnectionError("");
+        };
+        stream.onmessage = (event) => {
+            if (disposed) return;
+            try {
+                const data: Job = JSON.parse(event.data);
+                setJob(data);
+                setConnectionError("");
+                if (!["running", "cancelling"].includes(data.status)) stream.close();
+            } catch { streamAvailable = false; }
+        };
+        stream.onerror = () => {
+            streamAvailable = false;
+            if (!disposed) setStreamConnected(false);
+        };
 		async function poll() {
+			if (streamAvailable) {
+                if (!disposed) timer = setTimeout(poll, 2500);
+                return;
+            }
 			try {
 				const data = await api<Job>(`preparazioni/${id}/stato`);
 				if (disposed) return;
 				setJob(data);
-				setError("");
-				if (data.status !== "running") return;
+				setConnectionError("");
+				if (!["running", "cancelling"].includes(data.status)) return;
 			} catch (e) {
 				if (!disposed)
-					setError(
+					setConnectionError(
 						`Aggiornamento interrotto: ${(e as Error).message} Nuovo tentativo in corso…`,
 					);
 			}
@@ -79,8 +132,24 @@ export default function LetterPage({
 		return () => {
 			disposed = true;
 			clearTimeout(timer);
+            stream.close();
+            setStreamConnected(false);
 		};
 	}, [id, job?.status, !!job?.result]);
+    useEffect(() => {
+        if (!dirty) return;
+        const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+        window.addEventListener("beforeunload", warn);
+        return () => window.removeEventListener("beforeunload", warn);
+    }, [dirty]);
+    useEffect(() => {
+        if (!job?.started_at || !["running", "cancelling"].includes(job.status)) return;
+        const started = Date.parse(job.started_at);
+        const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+        update();
+        const timer = setInterval(update, 1000);
+        return () => clearInterval(timer);
+    }, [job?.started_at, job?.status]);
 	useEffect(() => {
 		if (source) dialog.current?.showModal();
 	}, [source]);
@@ -88,23 +157,41 @@ export default function LetterPage({
 		setStarting(true);
 		setError("");
 		try {
-			setJob(await api<Job>(`preparazioni/${id}/genera`, { method: "POST" }));
+            if (dirty) await persistEdits();
+			setJob(await api<Job>(`preparazioni/${id}/genera`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ thinking, tools_enabled: toolsEnabled }),
+            }));
 		} catch (e) {
 			setError((e as Error).message);
 		} finally {
 			setStarting(false);
 		}
 	}
+    async function persistEdits() {
+        setSaving(true);
+        try {
+            const editor = await api<Editor>(`preparazioni/${id}/modifiche`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ revision: savedEditor.revision, sections: edits }),
+            });
+            setSavedEditor(editor);
+        } finally { setSaving(false); }
+    }
+    async function saveEdits() {
+        setError("");
+        try { await persistEdits(); }
+        catch (e) { setError((e as Error).message); }
+    }
+    async function cancel() {
+        setError("");
+        try {
+            setJob(await api<Job>(`preparazioni/${id}/interrompi`, { method: "POST" }));
+        } catch (e) { setError((e as Error).message); }
+    }
 	function download() {
-		if (!job?.result || !preparation) return;
-		const text =
-			"BOZZA DI LETTERA DI DIMISSIONE — DA REVISIONARE\n\n" +
-			preparation.packet.template.sections
-				.map(
-					(s, i) =>
-						`${i + 1}. ${s.title}\n${job.result!.draft.sections.find((d) => d.section_id === s.id)?.text ?? ""}\n`,
-				)
-				.join("\n");
+		if (!job || !preparation) return;
+		const text = letterText(preparation.packet.template.sections, edits, job);
 		const url = URL.createObjectURL(
 			new Blob([text], { type: "text/plain;charset=utf-8" }),
 		);
@@ -133,12 +220,19 @@ export default function LetterPage({
 	const catalog = job.result?.catalog ?? preparation.catalog;
 	const definition = packet.template.sections.find((s) => s.id === active)!;
 	const draft = job.result?.draft.sections.find((s) => s.section_id === active);
-	const busy = starting || job.status === "running";
+	const busy = starting || ["running", "cancelling"].includes(job.status);
+    const inventory = job.result?.facts ?? preparation.facts;
 	const terminalError = job.status === "failed" || job.status === "interrupted";
 	const sourceURL = (sourceId: string) =>
 		`/degenze/${id}/fonti/${encodeURIComponent(sourceId)}`;
-	const showSource = (sourceId: string) =>
+	const showSource = (sourceId: string) => {
+        setFocusEvidenceId(undefined);
 		setSource(catalog.sources.find((s) => s.id === sourceId));
+    };
+    const showEvidence = (evidenceId: string) => {
+        const evidence = catalog.evidences.find((e) => e.id === evidenceId);
+        if (evidence) { showSource(evidence.source_id); setFocusEvidenceId(evidenceId); }
+    };
 	function citations(section: DraftSection | undefined) {
 		if (!section?.sources.length)
 			return (
@@ -150,7 +244,7 @@ export default function LetterPage({
 				<article className="citation" key={c.source_id}>
 					<div className="citation-title">
 						<FiFileText />
-							<button onClick={() => showSource(item.id)}>
+							<button onClick={() => showEvidence(c.evidence_ids[0])}>
 							{sourceTitle(item)}
 						</button>
 					</div>
@@ -202,15 +296,17 @@ export default function LetterPage({
 					</p>
 				</div>
 				<div className="actions">
-					{job.result && (
-						<button onClick={download} className="button secondary">
+                    {job.status === "running" && (
+                        <button onClick={cancel} className="button secondary">Interrompi</button>
+                    )}
+						<button onClick={download} className="button secondary"
+                            disabled={!packet.template.sections.some((s) => sectionText(s.id, edits, job).trim())}>
 							<FiDownload /> Scarica bozza
 						</button>
-					)}
 					<button
 						className="button primary"
 						onClick={generate}
-						disabled={busy || job.status !== "prepared"}
+						disabled={busy || saving || job.status !== "prepared"}
 					>
 						{busy ? <FiLoader className="spin" /> : <FiFileText />}
 						{busy
@@ -223,6 +319,28 @@ export default function LetterPage({
 					</button>
 				</div>
 			</div>
+            <fieldset className="generation-options" disabled={starting || job.status !== "prepared"}>
+                <legend>Opzioni di generazione</legend>
+                <label>
+                    <input type="checkbox" checked={thinking}
+                        onChange={(e) => setThinking(e.target.checked)} />
+                    Reasoning
+                </label>
+                <label>
+                    <input type="checkbox" checked={toolsEnabled}
+                        onChange={(e) => setToolsEnabled(e.target.checked)} />
+                    Verifiche documentali
+                </label>
+                <small>Nessun limite di durata complessiva. Puoi interrompere la generazione durante l’attesa.</small>
+            </fieldset>
+            <div className="editor-summary" role="status">
+                <span>{dirty ? "Modifiche da salvare" : savedEditor.revision > 0 ? "Modifiche salvate" : "Puoi scrivere in ogni sezione"}</span>
+                <span>I testi inseriti a mano restano conservati durante la generazione.</span>
+                <button onClick={saveEdits} className="button secondary" disabled={saving || !dirty}>
+                    {saving ? <FiLoader className="spin" /> : <FiSave />}
+                    {saving ? "Salvataggio…" : "Salva modifiche"}
+                </button>
+            </div>
 			<div className="context-bar">
 				<span>
 					<strong>Paziente</strong>
@@ -258,6 +376,7 @@ export default function LetterPage({
 					{error}
 				</div>
 			)}
+            {connectionError && <div className="error" role="alert">{connectionError}</div>}
 			{terminalError && (
 				<div className="error" role="alert">
 					{job.detail}{" "}
@@ -268,20 +387,26 @@ export default function LetterPage({
 			)}
 			{busy && (
 				<div className="notice" role="status">
-					<FiLoader className="spin" /> Il modello sta preparando la bozza e le
-					citazioni. Puoi consultare le fonti durante l’attesa.
+					<FiLoader className="spin" />
+                    {job.status === "cancelling" ? "Interruzione in corso" : (phaseLabels[job.phase ?? ""] ?? "Generazione in corso")}
+                    {" · "}{Math.floor(elapsed / 60)} min {elapsed % 60} s.
+                    {" "}Puoi consultare le fonti durante l’attesa.
+                    {" "}{streamConnected ? "Testo aggiornato in tempo reale." : "Aggiornamento periodico del testo."}
 				</div>
 			)}
+            {(busy || (!job.result && !!job.preview?.sections.length)) && (
+                <p className="stream-note">Il testo in arrivo è provvisorio: i controlli su struttura e riferimenti vengono eseguiti al termine.</p>
+            )}
 			<div className="workspace">
 				<section className="panel letter-panel">
 					<div className="panel-heading">
 						<div>
 							<h2>
-								<FiFileText /> Template della lettera
+							<FiFileText /> Bozza della lettera
 							</h2>
 							<p>
 								{packet.template.sections.length} sezioni · Seleziona una
-								sezione per consultarne le fonti
+								sezione per consultarne le fonti · Testo modificabile
 							</p>
 						</div>
 						<span className="paper-label">
@@ -293,10 +418,13 @@ export default function LetterPage({
 							const generated = job.result?.draft.sections.find(
 								(d) => d.section_id === s.id,
 							);
+                            const incoming = job.preview?.sections.find((d) => d.section_id === s.id);
+                            const manual = Object.hasOwn(edits, s.id);
+                            const writing = busy && !!incoming && job.preview?.sections[job.preview.sections.length - 1]?.section_id === s.id;
 							return (
 								<article
 									key={s.id}
-									className={`letter-section ${active === s.id ? "is-active" : ""}`}
+									className={`letter-section ${active === s.id ? "is-active" : ""} ${writing ? "is-streaming" : ""}`}
 								>
 									<button
 										className="section-heading"
@@ -313,35 +441,38 @@ export default function LetterPage({
 										<FiChevronRight />
 									</button>
 									<div className="section-body">
-										{generated ? (
-											<>
-												<p className="draft-text">
-													{generated.text ||
-														"Campo lasciato vuoto secondo il template."}
-												</p>
-												<button
+                                        <div className="section-editor-meta">
+                                            <span className={writing ? "stream-badge" : "muted"}>
+                                                {manual ? "Testo modificato a mano" : generated ? "Testo generato" : writing ? "In scrittura…" : incoming ? "Testo ricevuto · provvisorio" : "Da compilare"}
+                                            </span>
+                                            {manual && <button className="text-button" onClick={() => setEdits((current) => {
+                                                const next = { ...current }; delete next[s.id]; return next;
+                                            })}>{generated || incoming ? "Usa testo AI" : "Rimuovi testo manuale"}</button>}
+                                        </div>
+                                        {!generated && !incoming && <div className="section-field-labels">
+                                            {s.fields.map((f) => <span key={f.id}>{f.label}{f.context_key ? `: ${packet.context[f.context_key] ?? "Non disponibile"}` : ""}</span>)}
+                                        </div>}
+                                        <textarea
+                                            className="section-editor"
+                                            aria-label={`Testo — ${s.title}`}
+                                            value={sectionText(s.id, edits, job)}
+                                            rows={Math.min(16, Math.max(4, sectionText(s.id, edits, job).split("\n").length + 1))}
+                                            maxLength={100000}
+                                            placeholder="Scrivi qui oppure avvia la generazione per ricevere il testo."
+                                            onFocus={() => setActive(s.id)}
+                                            onChange={(e) => setEdits((current) => ({ ...current, [s.id]: e.target.value }))}
+                                        />
+                                        {manual && (generated || incoming) && <details className="generated-comparison">
+                                            <summary>{busy ? "Testo AI in arrivo" : "Testo AI originale"}</summary>
+                                            <p className="draft-text">{generated?.text ?? incoming?.text}</p>
+                                        </details>}
+                                        {generated && <button
 													className="text-button citation-count"
 													onClick={() => setActive(s.id)}
 												>
-													{generated.sources.length} fonti citate{" "}
+													{generated.sources.length} fonti del testo AI{" "}
 													<FiChevronRight />
-												</button>
-											</>
-										) : (
-											<div className="field-placeholders">
-												{s.fields.map((f) => (
-													<div key={f.id}>
-														<span>{f.label}</span>
-														<span>
-															{f.context_key
-																? (packet.context[f.context_key] ??
-																	"Non disponibile")
-																: "Da compilare con la generazione"}
-														</span>
-													</div>
-												))}
-											</div>
-										)}
+												</button>}
 									</div>
 								</article>
 							);
@@ -356,12 +487,41 @@ export default function LetterPage({
 						</div>
 					</div>
 					<div className="evidence-body">
+                        {inventory && inventory.issues.length > 0 && (
+                            <div className="documentary-issues">
+                                <h3>Informazioni da verificare nelle fonti</h3>
+                                {inventory.issues.map((issue, index) => (
+                                    <p key={index}>{issue.message}{" "}
+                                        {issue.evidence_ids.map((eid) => {
+                                            const ev = catalog.evidences.find((e) => e.id === eid);
+                                            return ev ? <button key={eid} className="text-button"
+                                                onClick={() => showEvidence(eid)}>Apri passaggio {eid}</button> : null;
+                                        })}
+                                    </p>
+                                ))}
+                            </div>
+                        )}
+                        {inventory && inventory.facts.length > 0 && (
+                            <details className="all-sources">
+                                <summary>Dati strutturati riconosciuti ({inventory.facts.length})</summary>
+                                <p className="muted">Estratti dai record strutturati; le note libere restano nelle fonti originali.</p>
+                                {inventory.facts.map((fact) => (
+                                    <article className="citation" key={fact.id}>
+                                        <strong>{fact.label}</strong>
+                                        <p>{fact.event_time} · {fact.status ?? "Stato non specificato"}</p>
+                                        {"value" in fact.attributes && <p>{String(fact.attributes.value)} {String(fact.attributes.unit ?? "Unità non documentata")}</p>}
+                                        <button className="text-button" onClick={() => showSource(fact.source_id)}>Apri fonte</button>
+                                    </article>
+                                ))}
+                            </details>
+                        )}
 						{job.result ? (
 							<>
 								<p className="evidence-intro">
 									Fonti citate dal modello per questa sezione.
 								</p>
 								{citations(draft)}
+                                {Object.hasOwn(edits, active) && <p className="trace-note">Le citazioni si riferiscono al testo AI originale; le modifiche manuali richiedono una nuova verifica delle fonti.</p>}
 								<p className="trace-note">
 									Riferimenti controllati tecnicamente. Pertinenza e correttezza
 									clinica da revisionare.
@@ -424,8 +584,9 @@ export default function LetterPage({
 			>
 				{source && (
 					<SourceDocument
-						key={source.id}
+						key={source.id + (focusEvidenceId ?? "")}
 						source={source}
+                        focusEvidenceId={focusEvidenceId}
 						evidences={catalog.evidences.filter(
 							(e) => e.source_id === source.id,
 						)}

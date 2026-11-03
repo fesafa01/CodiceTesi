@@ -50,6 +50,11 @@ I dettagli delle regole sono nei sorgenti del template e del prompt.
 
 ## Interfaccia web locale
 
+Il client `app` è nel profilo Compose `cli`: avviare lo stack ordinario non
+lancia automaticamente una seconda generazione. Per una prova CLI usare
+`docker compose run --rm app ...` oppure attivare esplicitamente il profilo.
+Il limite di una generazione web alla volta non coordina richieste CLI separate.
+
 ```bash
 docker compose up -d --build web
 ```
@@ -64,17 +69,24 @@ backend clinico. Il browser non riceve token o credenziali del modello. Le
 preparazioni conservano uno snapshot delle fonti; una generazione alla volta,
 con stato e risultati recuperabili ricaricando la pagina. La bozza richiede la
 revisione del medico. Dettagli e avvio di sviluppo in [web/README.md](web/README.md).
+Le sezioni sono modificabili e salvabili; il testo AI appare progressivamente
+durante lo streaming. Le modifiche manuali vengono conservate e incluse nel
+download, con il testo AI originale disponibile per confronto.
 
 ## Evidenze e approfondimenti agentici
 
-La generazione non ha una durata massima complessiva predefinita. Se serve,
-si può imporla dalla CLI con `--total-timeout SECONDI`. Restano i controlli di
+La generazione non ha una durata massima complessiva predefinita. Solo se serve,
+si può imporla dalla CLI con `--total-timeout SECONDI` o dall'API con
+`timeout_seconds`. La pagina mostra fase e tempo trascorso e consente
+**Interrompi**, conservando la risposta parziale. Restano i controlli di
 inattività del modello e della connessione, distinti dalla durata totale.
 
-Reasoning e tool si configurano separatamente dalla CLI con
-`--thinking`/`--no-thinking` e `--tools`/`--no-tools`.
+La UI offre due caselle indipendenti: **Reasoning** (inizialmente spuntata) e
+**Verifiche documentali** (inizialmente non spuntata). Le quattro combinazioni
+sono disponibili anche dalla CLI con `--thinking`/`--no-thinking` e
+`--tools`/`--no-tools`.
 
-`--tools` abilita riepiloghi delle osservazioni, sequenze delle
+`--tools` o la casella **Verifiche documentali** abilita riepiloghi delle osservazioni, sequenze delle
 terapie documentate e cronologie, oltre all’ispezione dei passaggi originali.
 Tutte le fonti restano nel contesto iniziale; le elaborazioni usano soltanto lo
 snapshot della degenza, con limiti di richieste, risultati e token. Questa modalità richiede

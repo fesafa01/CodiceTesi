@@ -21,7 +21,9 @@ body {
 	line-height: 1.5;
 }
 button,
-input {
+input,
+textarea,
+select {
 	font: inherit;
 }
 button,
@@ -50,6 +52,8 @@ a {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
 summary:focus-visible {
 	outline: 3px solid #65b6a4;
 	outline-offset: 3px;
@@ -607,30 +611,49 @@ h3 {
 .section-body {
 	padding: 14px 17px 17px;
 }
-.field-placeholders {
-	display: grid;
-	gap: 9px;
-}
-.field-placeholders > div {
-	display: flex;
-	justify-content: space-between;
-	gap: 16px;
-	font-size: 10px;
-	color: #9caaa3;
-}
-.field-placeholders > div > span:first-child {
-	color: #798e83;
-}
-.field-placeholders > div > span:last-child {
-	text-align: right;
-	overflow-wrap: anywhere;
-}
 .draft-text {
 	white-space: pre-wrap;
 	font-size: 12px;
 	line-height: 1.8;
 	overflow-wrap: anywhere;
 }
+.editor-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: .75rem 1rem;
+    margin: 1rem 0;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 3px 12px #203b4008;
+}
+.editor-summary > span:first-child { color: var(--teal); font-weight: 600; }
+.editor-summary > span:nth-child(2) { color: var(--muted); font-size: 12px; flex: 1; }
+.section-editor {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.7;
+    resize: vertical;
+}
+.section-editor::placeholder { color: #6e8082; }
+.section-editor-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; margin-bottom: .6rem; font-size: 12px; }
+.section-field-labels { display: flex; flex-wrap: wrap; gap: .35rem 1rem; margin-bottom: .7rem; color: var(--muted); font-size: 11px; }
+.stream-note { color: var(--muted); font-size: 12px; margin: .5rem 0 1rem; }
+.stream-badge { color: var(--teal); font-weight: 600; }
+.letter-section.is-streaming { border-color: var(--teal); }
+.generated-comparison { margin-top: .75rem; padding: .5rem .75rem; background: var(--bg); border-radius: 6px; }
+.generated-comparison summary { cursor: pointer; font-size: 12px; color: var(--teal); }
 .citation-count {
 	display: inline-flex;
 	align-items: center;
@@ -1350,13 +1373,6 @@ h3 {
 		font-size: 10px;
 		gap: 8px;
 	}
-	.field-placeholders > div {
-		display: block;
-	}
-	.field-placeholders > div > span {
-		display: block !important;
-		text-align: left !important;
-	}
 	.footer {
 		font-size: 9px;
 		display: block;
@@ -1381,3 +1397,14 @@ h3 {
 		overflow: auto;
 	}
 }
+
+.generation-options { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin: 1rem 0; padding: 1rem; border: 1px solid #cbd5e1; border-radius: .4rem; }
+.generation-options legend { padding: 0 .4rem; font-weight: 600; }
+.generation-options label { display: flex; align-items: center; gap: .5rem; }
+.generation-options input[type="checkbox"] { width: 1rem; height: 1rem; margin: 0; accent-color: var(--teal); flex-shrink: 0; cursor: pointer; }
+.generation-options input:disabled { cursor: not-allowed; }
+.generation-options small { flex-basis: 100%; color: #475569; }
+.documentary-issues { padding: 1rem; margin-bottom: 1rem; background: #fffbeb; border: 1px solid #fcd34d; border-radius: .6rem; }
+.documentary-issues p { margin: .7rem 0; }
+.focused-evidence { padding: 1rem; margin-bottom: 1rem; background: #eff6ff; border-left: 3px solid #2563eb; }
+.focused-evidence blockquote { white-space: pre-wrap; overflow-wrap: anywhere; margin: .8rem 0; }

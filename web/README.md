@@ -21,20 +21,58 @@ resta esplicito, come descritto nel README principale.
 2. “Continua” chiama agent-api per recuperare il pacchetto della degenza e
    conservarne uno snapshot. Nella seconda pagina compaiono le 17 sezioni Campus,
    gli identificativi verificati e tutte le fonti disponibili.
-3. “Genera” avvia `run_application` sullo stesso pacchetto già caricato, senza
-   rileggere fonti eventualmente cambiate nel DB. Il lavoro continua anche
-   chiudendo la pagina. L’URL della preparazione consente di recuperare lo stato.
-4. Dopo i controlli esistenti su struttura, campi e riferimenti, la bozza viene
+3. Ogni sezione ha un editor di testo, utilizzabile prima, durante e dopo la
+   generazione. **Salva modifiche** conserva i testi sulla preparazione; prima di
+   **Genera** le modifiche presenti vengono salvate anche automaticamente.
+4. “Genera” avvia `run_application` sullo stesso pacchetto già caricato, senza
+   rileggere fonti eventualmente cambiate nel DB. Il testo appare progressivamente
+   nelle rispettive sezioni, anche prima che il JSON sia completo. Il lavoro
+   continua chiudendo la pagina; riaprendo l'URL si recuperano stato, anteprima
+   e modifiche salvate.
+5. Dopo i controlli esistenti su struttura, campi e riferimenti, la bozza viene
    mostrata con le citazioni della sezione selezionata. Ogni fonte si apre come
    documento impaginato, anche in una scheda dedicata: campi strutturati, eventi
    della degenza e ricerca nel contenuto. Le viste Testo originale e JSON
    conservano il dettaglio completo, con download del JSON e metadati di provenienza.
-   È disponibile il download della bozza TXT.
+   Il download TXT contiene il testo attualmente nell'editor, comprese le
+   modifiche manuali; se la generazione non è completata, lo dichiara nel titolo.
 
 Le citazioni sono quelle proposte dal modello e validate nei riferimenti: la
 correttezza clinica rimane da revisionare. Prima della generazione il catalogo
 mostra tutte le fonti disponibili, senza attribuirle arbitrariamente alle sezioni.
-Il template resta in sola lettura; la UI non gestisce firma o approvazione clinica.
+Il testo delle sezioni è modificabile; intestazioni e struttura del template
+restano canoniche. La UI non gestisce firma o approvazione clinica.
+
+Le modifiche manuali prevalgono sullo streaming, anche quando il testo inserito
+è vuoto. **Usa testo AI** rimuove la modifica della singola sezione e ripristina
+il testo generato più recente. Quando una sezione è stata modificata, un riquadro
+espandibile mantiene visibile il testo AI per confronto. I testi manuali non
+vengono inseriti nel prompt: il modello lavora sul pacchetto delle fonti originale.
+Le citazioni mostrate riguardano esclusivamente la versione generata dal modello.
+L'originale validato e i suoi hash non vengono riscritti dalle modifiche manuali.
+
+Lo streaming usa SSE attraverso il proxy Next.js, senza buffering o scadenza
+totale della connessione, con aggiornamenti dell'anteprima fino a quattro volte
+al secondo. Se la connessione live non è disponibile, la pagina torna alla lettura
+periodica dello stato ogni 2,5 secondi. I frammenti sono sempre indicati come
+provvisori fino al completamento dei controlli finali; ragionamento e argomenti
+dei tool non sono inclusi nell'anteprima. Una nuova risposta nel ciclo con tool
+sostituisce l'anteprima precedente, conservando i testi manuali.
+
+Prima della generazione si possono spuntare separatamente **Reasoning** e
+**Verifiche documentali**: tutte e quattro le combinazioni sono supportate dalla UI.
+La casella **Verifiche documentali** abilita riepiloghi delle osservazioni,
+sequenze farmacologiche e cronologie sullo snapshot, oltre alla lettura puntuale
+delle evidenze. Tutto il contesto è già inviato nella prima richiesta.
+I valori iniziali sono reasoning attivo e tool disattivi. Le opzioni scelte
+restano visibili durante e dopo il lavoro e sono conservate nello stato.
+Non c'è una durata massima complessiva predefinita; restano i timeout di
+inattività e connessione. Durante il lavoro sono
+visibili fase, tempo trascorso e pulsante **Interrompi**. Il clic sulle citazioni
+apre il passaggio richiamato; dati strutturati e rilievi documentali sono
+consultabili nella colonna delle fonti. L'arresto remoto sullo Spark resta da
+verificare separatamente. Dettagli nelle
+[integrazioni agentiche](../docs/integrazioni-agentiche.md).
 
 ## Servizi e configurazione
 
@@ -48,7 +86,11 @@ Non sono presenti credenziali LLM nel browser. Le altre variabili server sono
 `APP_BACKEND_URL` e `AGENT_API_URL`. agent-api legge la configurazione LLM e
 l’osservabilità già usate dal client CLI.
 
-Snapshot e stati web sono in `output/dimissioni/web-sessions/<uuid>/`; le
+Snapshot e stati web sono in `output/dimissioni/web-sessions/<uuid>/`;
+`preview.json` conserva l'ultima anteprima e `editor.json` i testi manuali con
+numero di revisione. Un salvataggio da una scheda non aggiornata riceve 409,
+senza sovrascrivere le modifiche dell'altra scheda. I testi manuali non sono
+esportati in telemetria. Le
 esecuzioni mantengono gli artefatti e il registro standard. Il riavvio conserva
 preparazioni e risultati, marcando come interrotti i lavori non terminati. Nessun
 retry automatico: dopo errore o interruzione si prepara nuovamente la degenza.

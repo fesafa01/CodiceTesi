@@ -195,8 +195,21 @@ degli altri contenuti clinici, senza essere aggiunti alla telemetria.
 I due documenti leggibili derivano dallo stesso risultato strutturato. Se il
 medico modifica `bozza.txt`, il suo hash non corrisponde più a quello registrato:
 le citazioni precedenti restano riferite alla bozza generata e non certificano
-la riscrittura. Una futura interfaccia di revisione dovrà conservare versioni e
-richiedere la riconferma dei collegamenti delle sezioni modificate.
+la riscrittura.
+
+L'editor web conserva le modifiche in `web-sessions/<id>/editor.json`, separato
+dal risultato AI e dagli artefatti con hash. Il numero di revisione impedisce
+salvataggi concorrenti da schede non aggiornate; viene conservata l'ultima
+revisione manuale, senza uno storico completo di tutte le riscritture. La UI
+mostra il testo AI per confronto e dichiara che le citazioni non certificano le
+modifiche manuali. Il download TXT include il testo corrente dell'editor.
+La riconferma registrata dei collegamenti e l'approvazione clinica restano
+funzionalità future.
+
+`preview.json` contiene soltanto il testo progressivo delle sezioni canoniche,
+decodificato dal JSON ancora incompleto. L'anteprima viene inviata via SSE come
+testo provvisorio, senza citazioni validate o ragionamento; il risultato completo
+rimane disponibile solo dopo gli stessi controlli tecnici già previsti.
 
 ## 5. Integrazione nel prototipo
 

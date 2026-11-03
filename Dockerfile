@@ -8,6 +8,9 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable
 
+FROM builder AS web-builder
+RUN uv sync --locked --no-dev --no-editable --extra web
+
 FROM builder AS backend-builder
 RUN uv sync --locked --no-dev --no-editable --extra backend
 
@@ -27,7 +30,7 @@ ENTRYPOINT ["tesi-backend"]
 CMD ["serve"]
 
 FROM runtime-base AS agent-api
-COPY --from=backend-builder /app/.venv /app/.venv
+COPY --from=web-builder /app/.venv /app/.venv
 ENTRYPOINT ["python", "-m", "codice_tesi.web_api"]
 
 FROM runtime-base AS runtime

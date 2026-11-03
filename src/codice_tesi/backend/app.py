@@ -15,12 +15,13 @@ from psycopg import Error as DatabaseError
 from psycopg_pool import PoolTimeout
 from starlette.exceptions import HTTPException
 
-from codice_tesi.backend.auth import require_context_identity, require_identity
+from codice_tesi.backend.auth import require_context_identity
 from codice_tesi.backend.database import BackendSettings, Database
 from codice_tesi.backend.repository import BackendError, list_contexts, read_packet
 from codice_tesi.demo_access import DEMO_IDENTITIES, DemoIdentity
 from codice_tesi.discharge.models import CompositionPacket, Context
 from codice_tesi.discharge.template import LetterTemplate, load_template
+from codice_tesi.http_auth import require_identity
 
 logger = logging.getLogger("clinical_backend")
 router = APIRouter(

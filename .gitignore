@@ -231,3 +231,7 @@ __marimo__/
 /web/node_modules/
 /web/.next/
 /web/*.tsbuildinfo
+
+# Il codice sorgente frontend non è una directory di librerie compilate.
+!/web/src/lib/
+!/web/src/lib/**

@@ -44,15 +44,15 @@ async function proxy(request: NextRequest, path: string[]) {
 	const agent = process.env.AGENT_API_URL ?? "http://127.0.0.1:8002";
 	const isList = request.method === "GET" && route === "contesti";
 	const isPreparation =
-		/^preparazioni(?:\/[0-9a-f-]{36}(?:\/(?:genera|stato|fonti\/[^/]+))?)?$/.test(
+		/^preparazioni(?:\/[0-9a-f-]{36}(?:\/(?:genera|interrompi|modifiche|stream|stato|fonti\/[^/]+))?)?$/.test(
 			route,
 		);
 	const allowed =
 		isList ||
 		(isPreparation &&
-			((request.method === "GET" && path.length > 1 && path[2] !== "genera") ||
+			((request.method === "GET" && path.length > 1 && !["genera", "interrompi", "modifiche"].includes(path[2])) ||
 				(request.method === "POST" &&
-					(path.length === 1 || (path.length === 3 && path[2] === "genera")))));
+					(path.length === 1 || (path.length === 3 && ["genera", "interrompi", "modifiche"].includes(path[2]))))));
 	if (!allowed)
 		return Response.json(
 			{ detail: "Risorsa non disponibile." },
@@ -61,17 +61,24 @@ async function proxy(request: NextRequest, path: string[]) {
 	const target = isList
 		? `${backend}/api/v1/compilazione/contesti`
 		: `${agent}/api/v1/${path.map(encodeURIComponent).join("/")}`;
+	const isStream = request.method === "GET" && path[2] === "stream";
 	try {
 		const response = await fetch(target, {
 			method: request.method,
 			cache: "no-store",
-			signal: AbortSignal.timeout(30_000),
+			signal: isStream ? request.signal : AbortSignal.timeout(30_000),
 			headers: {
 				Authorization: `Bearer ${process.env.APP_BACKEND_TOKEN ?? "demo-revisore"}`,
 				"Content-Type": "application/json",
 			},
 			body: request.method === "POST" ? await request.text() : undefined,
 		});
+		if (isStream && response.ok) {
+			return new Response(response.body, {
+				status: response.status,
+				headers: { ...headers, "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no" },
+			});
+		}
 		return new Response(await response.text(), {
 			status: response.status,
 			headers: {
