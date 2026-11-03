@@ -27,6 +27,65 @@ services:
       otel-collector:
         condition: service_started
 
+  agent-api:
+    image: codice-tesi-agent-api:local
+    build:
+      context: .
+      target: agent-api
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_BACKEND_URL: http://backend:8001
+      WEB_OUTPUT_DIR: /app/output/dimissioni
+      TELEMETRY_ENABLED: "true"
+      TELEMETRY_ENDPOINT: http://otel-collector:4318
+      TELEMETRY_PROJECT: tesi-dimissioni
+      HARDWARE_ENABLED: ${HARDWARE_ENABLED:-true}
+      HARDWARE_ENDPOINT: ${HARDWARE_ENDPOINT:-http://spark-413e.tail9c981a.ts.net:9401}
+    volumes:
+      - ./output:/app/output
+    depends_on:
+      backend:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health/live', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  web:
+    image: codice-tesi-web:local
+    build: ./web
+    init: true
+    environment:
+      APP_BACKEND_URL: http://backend:8001
+      AGENT_API_URL: http://agent-api:8002
+      APP_BACKEND_TOKEN: ${APP_BACKEND_TOKEN:-demo-revisore}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+      agent-api:
+        condition: service_healthy
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://127.0.0.1:3000'); process.exit(r.ok ? 0 : 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   db:
     image: postgres:17-bookworm
     environment:

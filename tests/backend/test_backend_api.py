@@ -14,6 +14,7 @@ def test_openapi_contains_only_composition_and_health_routes():
         "/health/live",
         "/health/ready",
         "/api/v1/compilazione/template",
+        "/api/v1/compilazione/contesti",
         "/api/v1/compilazione/avvio-test",
         "/api/v1/compilazione/contesti/{context_id}/pacchetto",
     }

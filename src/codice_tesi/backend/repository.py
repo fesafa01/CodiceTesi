@@ -122,3 +122,21 @@ async def read_packet(
                 raise ValueError("Identità della fonte incoerente con il database.")
             sources.append(source)
         return CompositionPacket(context=context, sources=tuple(sources), template=load_template())
+
+
+async def list_contexts(
+    database: Database, *, allowed_context_ids: frozenset[str]
+) -> list[Context]:
+    """Elenco dal DB limitato alle assegnazioni, senza caricare le note cliniche."""
+    async with database.connection(read_only=True) as connection:
+        cursor = await connection.execute(
+            "SELECT id, payload FROM composition_contexts WHERE id = ANY(%s) ORDER BY id",
+            (sorted(allowed_context_ids),),
+        )
+        contexts = []
+        for row in await cursor.fetchall():
+            context = Context.model_validate(row["payload"])
+            if context.id != row["id"]:
+                raise ValueError("Identità del contesto incoerente con il database.")
+            contexts.append(context)
+        return contexts

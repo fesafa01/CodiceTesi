@@ -1,0 +1,26 @@
+{
+	"name": "dimissioni-web",
+	"version": "0.1.0",
+	"private": true,
+	"scripts": {
+		"dev": "bun --bun next dev --hostname 0.0.0.0",
+		"build": "bun --bun next build --webpack",
+		"start": "bun --bun next start --hostname 0.0.0.0",
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"next": "16.2.6",
+		"react": "19.2.6",
+		"react-dom": "19.2.6",
+		"react-icons": "5.6.0"
+	},
+	"devDependencies": {
+		"@types/node": "20.19.41",
+		"@types/react": "19.2.14",
+		"@types/react-dom": "19.2.3",
+		"postcss": "8.5.14",
+		"tailwindcss": "3.4.19",
+		"typescript": "5.9.3"
+	}
+}

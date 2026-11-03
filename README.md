@@ -45,6 +45,23 @@ Il template è `campus-discharge` 1.1.0: con istologico **No**, i dettagli resta
 vuoti; se la risposta manca nelle fonti, viene segnalata la lacuna senza dedurre No.
 I dettagli delle regole sono nei sorgenti del template e del prompt.
 
+## Interfaccia web locale
+
+```bash
+docker compose up -d --build web
+```
+
+Aprire [Dimissioni](http://localhost:3000): selezione dei casi dal DB, caricamento
+preventivo del pacchetto e del template, pulsante **Genera**, bozza e fonti
+cliccabili per sezione (testo originale e JSON). Il frontend usa Next.js, React,
+TypeScript e Tailwind nelle versioni di `tcs-assistant`.
+
+Il servizio `web` usa `agent-api`, adattatore HTTP del generatore esistente, e il
+backend clinico. Il browser non riceve token o credenziali del modello. Le
+preparazioni conservano uno snapshot delle fonti; una generazione alla volta,
+con stato e risultati recuperabili ricaricando la pagina. La bozza richiede la
+revisione del medico. Dettagli e avvio di sviluppo in [web/README.md](web/README.md).
+
 ## Accessi fittizi locali
 
 Gli endpoint di compilazione richiedono `Authorization: Bearer <token>`;

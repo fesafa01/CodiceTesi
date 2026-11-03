@@ -16,6 +16,7 @@ from codice_tesi.discharge.client import PacketClient
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.generator import LLMDraftGenerator
+from codice_tesi.discharge.models import CompositionPacket
 from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfig
 from codice_tesi.observability.hardware import HardwareConfig, HardwareObservation
 from codice_tesi.observability.telemetry import Telemetry, TelemetryConfig
@@ -34,10 +35,12 @@ async def _record_progress(generator, artifacts, record, hardware):
 async def run_application(
     *,
     backend_url: str,
+    packet: CompositionPacket | None = None,
     output_dir: Path,
     seed: int | None = None,
     context_id: str | None = None,
     dry_run: bool = False,
+    console: bool = True,
     settings: Settings | None = None,
     config: ModelConfig | None = None,
     context_config: ContextConfig | None = None,
@@ -45,6 +48,14 @@ async def run_application(
     telemetry_config: TelemetryConfig | None = None,
     hardware_config: HardwareConfig | None = None,
 ) -> Path:
+    def emit(*args, **kwargs):
+        if console:
+            print(*args, **kwargs)
+
+    if packet is not None:
+        if context_id is not None and context_id != packet.context.id:
+            raise ValueError("Il pacchetto preparato appartiene a un altro contesto.")
+        context_id = packet.context.id
     config = config or ModelConfig()
     context_config = context_config or ContextConfig()
     telemetry_config = telemetry_config or TelemetryConfig()
@@ -88,9 +99,10 @@ async def run_application(
                 selection_seed = seed if seed is not None else secrets.randbits(63)
                 record.data["selection_seed"] = selection_seed if context_id is None else None
                 with telemetry.stage(record, "fetch_packet"):
-                    packet = await PacketClient(backend_url).fetch(
-                        seed=selection_seed, context_id=context_id
-                    )
+                    if packet is None:
+                        packet = await PacketClient(backend_url).fetch(
+                            seed=selection_seed, context_id=context_id
+                        )
                 with telemetry.stage(record, "prepare_request"):
                     request = prepare_request(
                         packet,
@@ -111,20 +123,20 @@ async def run_application(
                     record.bind(packet, request, artifacts, context_config)
                 root.set_attribute("tesi.request_sha256", record.data["request_sha256"])
                 root.set_attribute("tesi.dataset_version", packet.context.dataset_version)
-                print(f"Contesto: {packet.context.id} ({packet.context.scope})", flush=True)
-                print(f"Cartella: {artifacts.directory}", flush=True)
-                print(f"Esecuzione: {record.data['run_id']}", flush=True)
-                print(
+                emit(f"Contesto: {packet.context.id} ({packet.context.scope})", flush=True)
+                emit(f"Cartella: {artifacts.directory}", flush=True)
+                emit(f"Esecuzione: {record.data['run_id']}", flush=True)
+                emit(
                     f"Note nel contesto: {len(packet.sources)}; "
                     f"campi Campus: {len(packet.template.sections)}; richieste LLM: 1; "
                     f"thinking={'attivo' if config.thinking else 'disattivo'}",
                     flush=True,
                 )
                 if dry_run:
-                    print(f"Richiesta pronta: {artifacts.request}", flush=True)
+                    emit(f"Richiesta pronta: {artifacts.request}", flush=True)
                     record.finish("prepared")
                     return artifacts.directory
-                print(
+                emit(
                     "Redazione delle sezioni e citazioni in JSON. "
                     "Ctrl+C conserva la risposta parziale.\n",
                     flush=True,
@@ -161,7 +173,7 @@ async def run_application(
                                             async for chunk in chunks:
                                                 output.write(chunk)
                                                 output.flush()
-                                                print(chunk, end="", flush=True)
+                                                emit(chunk, end="", flush=True)
                                     finally:
                                         await hardware.stop()
                                         record.data["hardware"] = hardware.summary()
@@ -180,8 +192,8 @@ async def run_application(
                 record.data["draft_sha256"] = sha256(artifacts.draft.read_bytes()).hexdigest()
                 record.data["artifact_hashes"] = dict(artifacts.report["artefatti_sha256"])
                 record.finish("completed", llm=generator.usage.get("metrics"))
-                print(f"\n\nBozza salvata: {artifacts.draft}", flush=True)
-                print(f"Fonti per sezione: {artifacts.evidences}", flush=True)
+                emit(f"\n\nBozza salvata: {artifacts.draft}", flush=True)
+                emit(f"Fonti per sezione: {artifacts.evidences}", flush=True)
                 return artifacts.directory
             except BaseException as exc:
                 interrupted = isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt))
@@ -196,7 +208,7 @@ async def run_application(
                         error=exc,
                         usage=generator.usage if generator else None,
                     )
-                    print(
+                    emit(
                         f"\nRedazione non completata. Testo parziale: {artifacts.partial}",
                         flush=True,
                     )

@@ -17,7 +17,7 @@ PREFIX = "/api/v1/compilazione"
 
 @pytest.mark.parametrize(
     "path",
-    ["/template", "/avvio-test?seed=42", "/contesti/synthea-caso-01/pacchetto"],
+    ["/template", "/contesti", "/avvio-test?seed=42", "/contesti/synthea-caso-01/pacchetto"],
 )
 @pytest.mark.parametrize("authorization", [None, "Basic demo", "Bearer errato", "Bearer"])
 def test_credentials_required_before_reading_any_data(path, authorization):

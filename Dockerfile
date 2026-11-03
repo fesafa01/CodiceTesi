@@ -26,6 +26,10 @@ COPY --from=backend-builder /app/.venv /app/.venv
 ENTRYPOINT ["tesi-backend"]
 CMD ["serve"]
 
+FROM runtime-base AS agent-api
+COPY --from=backend-builder /app/.venv /app/.venv
+ENTRYPOINT ["python", "-m", "codice_tesi.web_api"]
+
 FROM runtime-base AS runtime
 COPY --from=builder /app/.venv /app/.venv
 COPY main.py ./

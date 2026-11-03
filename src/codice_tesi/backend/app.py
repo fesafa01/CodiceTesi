@@ -17,9 +17,9 @@ from starlette.exceptions import HTTPException
 
 from codice_tesi.backend.auth import require_context_identity, require_identity
 from codice_tesi.backend.database import BackendSettings, Database
-from codice_tesi.backend.repository import BackendError, read_packet
+from codice_tesi.backend.repository import BackendError, list_contexts, read_packet
 from codice_tesi.demo_access import DEMO_IDENTITIES, DemoIdentity
-from codice_tesi.discharge.models import CompositionPacket
+from codice_tesi.discharge.models import CompositionPacket, Context
 from codice_tesi.discharge.template import LetterTemplate, load_template
 
 logger = logging.getLogger("clinical_backend")
@@ -34,6 +34,14 @@ router = APIRouter(
 async def active_template():
     """Espone il template Campus incluso nell'applicazione."""
     return load_template()
+
+
+@router.get("/contesti", response_model=list[Context])
+async def contexts(
+    request: Request,
+    identity: Annotated[DemoIdentity, Depends(require_identity)],
+):
+    return await list_contexts(request.app.state.database, allowed_context_ids=identity.context_ids)
 
 
 @router.get("/avvio-test", response_model=CompositionPacket)

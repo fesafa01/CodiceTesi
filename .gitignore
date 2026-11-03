@@ -226,3 +226,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Interfaccia Next.js
+/web/node_modules/
+/web/.next/
+/web/*.tsbuildinfo

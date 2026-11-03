@@ -1,0 +1,5 @@
+# Override opzionale, dalla radice: docker compose -f compose.yaml -f web/compose.dev.yaml up -d agent-api
+services:
+  agent-api:
+    ports:
+      - "127.0.0.1:8002:8002"

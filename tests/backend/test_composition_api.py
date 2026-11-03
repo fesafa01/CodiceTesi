@@ -157,3 +157,26 @@ def test_case_imports_all_notes_once_without_combining_other_patients(empty_sett
         assert other["context"]["patient_id"] == "p2"
         notes = [s for s in other["sources"] if s["kind"].startswith("nota-")]
         assert len(notes) == 1 and notes[0]["text"].endswith("\n\nNota C")
+
+
+def test_context_listing_comes_from_database_and_respects_assignment(empty_settings, fhir):
+    path = fhir()
+    fhir(case_id="caso_02", patient_id="p2", encounter_id="e2", append=True)
+
+    async def prepare():
+        async with Database(empty_settings) as db:
+            await import_synthea(db, path)
+
+    asyncio.run(prepare())
+    with TestClient(create_app(empty_settings)) as client:
+        for token, expected in [
+            ("demo-revisore", ["synthea-caso-01", "synthea-caso-02"]),
+            ("demo-medico-a", ["synthea-caso-01"]),
+            ("demo-medico-b", ["synthea-caso-02"]),
+        ]:
+            response = client.get(
+                "/api/v1/compilazione/contesti", headers={"Authorization": "Bearer " + token}
+            )
+            assert response.status_code == 200
+            assert [row["id"] for row in response.json()] == expected
+            assert all("sources" not in row for row in response.json())

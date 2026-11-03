@@ -20,3 +20,6 @@ docs
 scripts
 .github
 observability
+
+# Il frontend ha un proprio contesto Docker
+web
