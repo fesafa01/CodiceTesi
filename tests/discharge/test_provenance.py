@@ -130,6 +130,70 @@ def test_invalid_or_ambiguous_json_is_not_repaired(packet_factory, raw):
         parse_draft(raw, build_catalog(packet), packet.template)
 
 
+@pytest.mark.parametrize("header", ["```", "```json", "```JSON"])
+def test_single_json_fence_preserves_content_and_technical_checks(
+    packet_factory, letter_factory, response_factory, header
+):
+    packet = packet_factory("nota")
+    raw = response_factory(letter_factory())
+    catalog = build_catalog(packet)
+    expected = parse_draft(raw, catalog, packet.template)
+    assert parse_draft(f"{header}\n{raw}\n```", catalog, packet.template) == expected
+    bad = raw.replace("evidenza-0001", "evidenza-inesistente")
+    with pytest.raises(ValueError, match="sconosciuta"):
+        parse_draft(f"{header}\n{bad}\n```", catalog, packet.template)
+
+
+@pytest.mark.parametrize("format", ["prose_before", "prose_after", "multiple", "unclosed"])
+def test_fence_handling_does_not_extract_json_from_ambiguous_responses(
+    packet_factory, letter_factory, response_factory, format
+):
+    packet = packet_factory("nota")
+    raw = response_factory(letter_factory())
+    fenced = f"```json\n{raw}\n```"
+    candidate = {
+        "prose_before": "Premessa\n" + fenced,
+        "prose_after": fenced + "\nConclusione",
+        "multiple": fenced + "\n" + fenced,
+        "unclosed": "```json\n" + raw,
+    }[format]
+    with pytest.raises(ValueError):
+        parse_draft(candidate, build_catalog(packet), packet.template)
+
+
+def test_all_canonical_fields_explicitly_missing_are_preserved_without_citations(
+    packet_factory, letter_factory, response_factory
+):
+    packet = packet_factory("nota")
+    data = json.loads(response_factory(letter_factory()))
+    section = next(s for s in data["sections"] if s["section_id"] == "medici")
+    section.update(
+        text="Specializzando: non disponibile.\nAltro medico: non disponibile.", sources=[]
+    )
+    draft = parse_draft(json.dumps(data), build_catalog(packet), packet.template)
+    assert draft.sections[-1].text == section["text"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Specializzando: Nome documentato.\nAltro medico: non disponibile.",
+        "Specializzando: non presente.\nAltro medico: non disponibile.",
+        "Specializzando: non disponibile.",
+        "Specializzando: non disponibile.\nSpecializzando: non disponibile.",
+        "Campo inventato: non disponibile.\nAltro medico: non disponibile.",
+    ],
+)
+def test_missing_field_markers_do_not_allow_uncited_values_negations_or_incomplete_fields(
+    packet_factory, letter_factory, response_factory, text
+):
+    packet = packet_factory("nota")
+    data = json.loads(response_factory(letter_factory()))
+    next(s for s in data["sections"] if s["section_id"] == "medici").update(text=text, sources=[])
+    with pytest.raises(ValueError, match="senza citazioni"):
+        parse_draft(json.dumps(data), build_catalog(packet), packet.template)
+
+
 def test_missing_data_is_uncited_but_documented_no_requires_evidence(
     packet_factory, letter_factory, response_factory
 ):

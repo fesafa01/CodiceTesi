@@ -2,7 +2,9 @@
 
 Prototipo locale per preparare una bozza di lettera di dimissione nei 17 campi
 Campus, con revisione del medico. Il flusso è fonti FHIR → PostgreSQL → pacchetto
-validato → una richiesta al modello sullo Spark → bozza o parziale con esito.
+validato → modello sullo Spark → bozza o parziale con esito. Il percorso ordinario
+usa una richiesta; la modalità opzionale con tool documentali consente approfondimenti
+solo sulle fonti della degenza selezionata.
 
 Il materiale Synthea attuale è sintetico e provvisorio: include scenari di uscita
 aggiunti da regole riproducibili, senza LLM e senza validazione clinica. Non è il
@@ -32,10 +34,11 @@ un record per tentativo, inclusi errori e interruzioni. La validazione riguarda
 schema, riferimenti delle citazioni, forma e campi istologici; il sostegno clinico
 delle affermazioni resta da valutare.
 
-La richiesta unica restituisce le 17 sezioni in JSON con le fonti citate. Il codice
+La generazione restituisce le 17 sezioni in JSON con le fonti citate. Il codice
 produce `bozza.txt`, `bozza_strutturata.json` ed `evidenze.md`, dove ogni sezione è
 affiancata alle fonti selezionate dal modello, con origine, versione ed estratti
-originali. In questa prima versione ogni evidenza copre una fonte completa. Il
+originali. Le evidenze individuano gli eventi della cronologia strutturata e i
+paragrafi delle note lunghe; le note brevi restano intere. Il
 catalogo è salvato prima dell'inferenza in `catalogo_evidenze.json`; lo stream
 grezzo rimane in `risposta.parziale.json`, anche a completamento riuscito.
 Riferimenti sconosciuti o incoerenti fanno fallire il controllo, conservando la
@@ -61,6 +64,32 @@ backend clinico. Il browser non riceve token o credenziali del modello. Le
 preparazioni conservano uno snapshot delle fonti; una generazione alla volta,
 con stato e risultati recuperabili ricaricando la pagina. La bozza richiede la
 revisione del medico. Dettagli e avvio di sviluppo in [web/README.md](web/README.md).
+
+## Evidenze e approfondimenti agentici
+
+La generazione non ha una durata massima complessiva predefinita. Se serve,
+si può imporla dalla CLI con `--total-timeout SECONDI`. Restano i controlli di
+inattività del modello e della connessione, distinti dalla durata totale.
+
+Reasoning e tool si configurano separatamente dalla CLI con
+`--thinking`/`--no-thinking` e `--tools`/`--no-tools`.
+
+`--tools` abilita riepiloghi delle osservazioni, sequenze delle
+terapie documentate e cronologie, oltre all’ispezione dei passaggi originali.
+Tutte le fonti restano nel contesto iniziale; le elaborazioni usano soltanto lo
+snapshot della degenza, con limiti di richieste, risultati e token. Questa modalità richiede
+supporto alle chiamate di funzione sul serving. Il percorso ordinario usa una
+sola richiesta e non richiede tool.
+Phoenix riceve uno span `TOOL` per ogni elaborazione o lettura eseguita, con nome, durata,
+esito e contatori dei risultati, senza argomenti o contenuti delle fonti.
+Le singole inferenze hanno span `LLM` distinti; il padre `AGENT` separa i totali
+del ciclo dalla dimensione massima del singolo prompt.
+
+`fatti_documentali.json` conserva i dati riconosciuti nei record strutturati e
+rilievi come quantità senza unità. Non interpreta automaticamente le note libere.
+Il risultato strutturato è versione 1.1, con lettura compatibile dei precedenti
+risultati 1.0. Uso, configurazione, verifiche e limiti nelle
+[integrazioni agentiche](docs/integrazioni-agentiche.md).
 
 ## Accessi fittizi locali
 

@@ -135,6 +135,8 @@ class Telemetry:
         self.runs = meter.create_counter("tesi.executions", unit="{execution}")
         self.total = meter.create_histogram("tesi.execution.duration", unit="s")
         self.stages = meter.create_histogram("tesi.stage.duration", unit="s")
+        self.agent_duration = meter.create_histogram("tesi.agent.duration", unit="s")
+        self.agent_requests = meter.create_histogram("tesi.agent.requests", unit="{request}")
         self.duration = meter.create_histogram("gen_ai.client.operation.duration", unit="s")
         self.first_chunk = meter.create_histogram(
             "gen_ai.client.operation.time_to_first_chunk", unit="s"
@@ -174,38 +176,6 @@ class Telemetry:
         finally:
             record.data["timings"][name + "_seconds"] = round(monotonic() - started, 6)
 
-    def llm_attributes(self, record, llm):
-        attributes = {
-            "openinference.span.kind": "LLM",
-            "gen_ai.operation.name": "chat",
-            "gen_ai.provider.name": "local_openai_compatible",
-            "gen_ai.request.model": record.data["model_config"]["model"],
-            "llm.model_name": llm.get("response_model") or record.data["model_config"]["model"],
-            "tesi.usage.available": llm.get("usage_available", False),
-            "tesi.usage.complete": llm.get("usage_complete", False),
-        }
-        for field, names in {
-            "input_tokens": ("gen_ai.usage.input_tokens", "llm.token_count.prompt"),
-            "output_tokens": ("gen_ai.usage.output_tokens", "llm.token_count.completion"),
-            "total_tokens": ("llm.token_count.total",),
-            "reasoning_tokens": ("gen_ai.usage.reasoning.output_tokens",),
-            "response_model": ("gen_ai.response.model",),
-            "time_to_first_chunk_seconds": ("gen_ai.response.time_to_first_chunk",),
-            "time_to_first_text_seconds": ("tesi.time_to_first_text_seconds",),
-            "time_to_first_reasoning_seconds": ("tesi.time_to_first_reasoning_seconds",),
-            "output_tokens_per_request_second": ("tesi.output_tokens_per_request_second",),
-            "server_decode_tokens_per_second": ("tesi.server_decode_tokens_per_second",),
-            "cached_input_tokens": ("gen_ai.usage.cache_read.input_tokens",),
-            "content_chunks_received": ("tesi.content_chunks_received",),
-            "finish_reason": ("tesi.finish_reason",),
-        }.items():
-            if llm.get(field) is not None:
-                for name in names:
-                    attributes[name] = llm[field]
-        if llm.get("finish_reason"):
-            attributes["gen_ai.response.finish_reasons"] = [llm["finish_reason"]]
-        return attributes
-
     def record_metrics(self, record):
         try:
             self._record_metrics(record)
@@ -222,6 +192,7 @@ class Telemetry:
             "tesi.dry_run": data["dry_run"],
             "gen_ai.request.model": data["model_config"]["model"],
             "tesi.thinking": data["model_config"]["thinking"],
+            "tesi.tools_enabled": data["model_config"]["tools_enabled"],
         }
         self.runs.add(1, attributes)
         self.total.record(data["timings"]["total_seconds"], attributes)
@@ -234,26 +205,29 @@ class Telemetry:
             "gen_ai.operation.name": "chat",
             "gen_ai.provider.name": "local_openai_compatible",
         }
-        for field, instrument in (
-            ("request_duration_seconds", self.duration),
-            ("time_to_first_chunk_seconds", self.first_chunk),
-            ("time_to_first_text_seconds", self.first_text),
-            ("output_tokens_per_request_second", self.rate),
-        ):
-            if llm.get(field) is not None:
-                instrument.record(llm[field], model_attributes)
-        if llm.get("usage_complete") and not llm.get("usage_issues"):
-            for token_type in ("input", "output"):
-                if llm.get(token_type + "_tokens") is not None:
-                    self.tokens.record(
-                        llm[token_type + "_tokens"],
-                        {
-                            **model_attributes,
-                            "gen_ai.token.type": token_type,
-                        },
-                    )
-            if llm.get("reasoning_tokens") is not None:
-                self.reasoning.record(llm["reasoning_tokens"], model_attributes)
+        if llm.get("cycle_duration_seconds") is not None:
+            self.agent_duration.record(llm["cycle_duration_seconds"], attributes)
+        if llm.get("model_requests_started") is not None:
+            self.agent_requests.record(llm["model_requests_started"], attributes)
+        samples = llm.get("requests", [])
+        for sample in samples:
+            for field, instrument in (
+                ("request_duration_seconds", self.duration),
+                ("time_to_first_chunk_seconds", self.first_chunk),
+                ("time_to_first_text_seconds", self.first_text),
+                ("output_tokens_per_request_second", self.rate),
+            ):
+                if sample.get(field) is not None:
+                    instrument.record(sample[field], model_attributes)
+            if sample.get("usage_complete") and not sample.get("usage_issues"):
+                for token_type in ("input", "output"):
+                    value = sample.get(token_type + "_tokens")
+                    if value is not None:
+                        self.tokens.record(
+                            value, {**model_attributes, "gen_ai.token.type": token_type}
+                        )
+                if sample.get("reasoning_tokens") is not None:
+                    self.reasoning.record(sample["reasoning_tokens"], model_attributes)
 
     def close(self):
         if self.provider is None:

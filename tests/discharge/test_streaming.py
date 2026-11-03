@@ -14,6 +14,7 @@ from codice_tesi.config import ModelConfig, Settings
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.generator import LLMDraftGenerator
+from codice_tesi.discharge.limits import ModelInactivityError
 
 
 def sse(text, finish=None):
@@ -75,8 +76,7 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
                 200, headers={"Content-Type": "text/event-stream"}, stream=Stream()
             )
 
-        def create_client(settings, *, streaming=False):
-            assert streaming
+        def create_client(settings):
             return AsyncOpenAI(
                 base_url="http://test/v1",
                 api_key="test",
@@ -122,6 +122,7 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
         assert {p.name for p in directory.iterdir()} == {
             "richiesta.txt",
             "catalogo_evidenze.json",
+            "fatti_documentali.json",
             "risposta.parziale.json",
             "bozza_strutturata.json",
             "evidenze.md",
@@ -143,11 +144,9 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
 def test_stream_has_finite_idle_timeout_without_retries():
     async def check():
         settings = Settings(timeout=15, _env_file=None)
-        async with api.create_client(settings, streaming=True) as client:
-            assert client.timeout == 15
-            assert client.max_retries == 0
         async with api.create_client(settings) as client:
             assert client.timeout == 15
+            assert client.max_retries == 0
 
     asyncio.run(check())
 
@@ -187,8 +186,9 @@ def test_first_text_deadline_limits_silence_but_not_running_letter(packet_factor
             if first_part == "text":
                 assert await consume() == "Testo finale."
             else:
-                with pytest.raises(ValueError, match="Limite di attesa"):
+                with pytest.raises(ModelInactivityError, match="Limite di attesa") as error:
                     await consume()
+                assert error.value.seconds == 0.06
                 assert "primo_testo_secondi" not in generator.usage["stream"]
 
     asyncio.run(check())
@@ -321,7 +321,7 @@ def test_timeout_before_first_text_preserves_failure_without_retry(
         calls.append(request)
         raise httpx.ReadTimeout("No stream data", request=request)
 
-    def create_client(settings, *, streaming=False):
+    def create_client(settings):
         return AsyncOpenAI(
             base_url="http://test/v1",
             api_key="test",
@@ -360,7 +360,7 @@ def test_truncated_response_keeps_partial_and_does_not_retry(
             content=sse(text, finish) + b"data: [DONE]\n\n",
         )
 
-    def create_client(settings, *, streaming=False):
+    def create_client(settings):
         return AsyncOpenAI(
             base_url="http://test/v1",
             api_key="test",
@@ -456,6 +456,7 @@ def test_dry_run_saves_one_exact_request_without_client_or_placeholders(
     assert {p.name for p in directory.iterdir()} == {
         "richiesta.txt",
         "catalogo_evidenze.json",
+        "fatti_documentali.json",
         "esito.json",
     }
     text = (directory / "richiesta.txt").read_text()

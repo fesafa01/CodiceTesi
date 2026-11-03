@@ -6,8 +6,7 @@ import json
 import pytest
 
 from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
-from codice_tesi.discharge.prompts import MISSING_VALUE
-from codice_tesi.discharge.template import load_template
+from codice_tesi.discharge.template import MISSING_VALUE, load_template
 
 
 @pytest.fixture

@@ -30,6 +30,18 @@ def main(argv: list[str] | None = None) -> None:
     )
     discharge.add_argument("--model", help="ID del modello richiesto al server configurato.")
     discharge.add_argument(
+        "--tools",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Consente elaborazioni documentali con tool locali sullo snapshot della degenza.",
+    )
+    discharge.add_argument(
+        "--total-timeout",
+        type=float,
+        default=None,
+        help="Durata massima complessiva opzionale in secondi; di default nessun limite.",
+    )
+    discharge.add_argument(
         "--experiment-file",
         type=Path,
         help="JSON dei metadati dichiarati: esperimento, checkpoint, hardware e ripetizione.",
@@ -101,6 +113,8 @@ def main(argv: list[str] | None = None) -> None:
             from codice_tesi.observability.telemetry import TelemetryConfig
 
             config = ModelConfig()
+            config.tools_enabled = args.tools
+            config.total_timeout = args.total_timeout
             if args.thinking is not None:
                 config.thinking = args.thinking
             if args.model is not None:

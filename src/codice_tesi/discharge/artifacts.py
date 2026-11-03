@@ -40,6 +40,7 @@ class RunArtifacts:
         self.template = packet.template
         self.packet = packet
         self.catalog = request.catalog
+        self.facts = request.facts
         context_name = re.sub(r"[^a-zA-Z0-9._-]", "_", packet.context.id).strip(".")[:80]
         if context_name != packet.context.id:
             context_name = (
@@ -58,6 +59,8 @@ class RunArtifacts:
         self.catalog_path.write_text(
             self.catalog.model_dump_json(indent=2) + "\n", encoding="utf-8"
         )
+        self.facts_path = self.directory / "fatti_documentali.json"
+        self.facts_path.write_text(self.facts.model_dump_json(indent=2) + "\n", encoding="utf-8")
         self.request = self.directory / "richiesta.txt"
         self.request.write_text(
             "ISTRUZIONI\n\n" + request.instructions + "\n\nCONTESTO E NOTE\n\n" + request.prompt,
@@ -77,10 +80,11 @@ class RunArtifacts:
             "prompt_version": PROMPT_VERSION,
             "config_modello": config.model_dump(mode="json"),
             "modalita": "anteprima" if preview else "generazione",
-            "richieste_llm_previste": 1,
+            "richieste_llm_previste": config.max_requests if config.tools_enabled else 1,
             "richieste_llm_avviate": 0,
             "campi_previsti": [section.id for section in packet.template.sections],
             "input_tokens_stimati": request.input_tokens_estimate,
+            "input_tokens_breakdown": request.input_tokens_breakdown,
             "input_estimate_method": request.input_estimate_method,
             "input_tokenizer_revision": request.input_tokenizer_revision,
             "fonti": [s.model_dump(mode="json", exclude={"text"}) for s in self.catalog.sources],
@@ -88,7 +92,7 @@ class RunArtifacts:
                 "schema_version": TRACE_SCHEMA_VERSION,
                 "technical": "not_run",
                 "clinical_review": "not_performed",
-                "localizzazione": "fonte_completa",
+                "localizzazione": self.catalog.segmentation_version,
             },
         }
         self.finish("preparato")
@@ -120,6 +124,7 @@ class RunArtifacts:
                     ),
                     catalog=self.catalog,
                     draft=draft,
+                    facts=self.facts,
                     validation={"technical": "passed", "clinical_review": "not_performed"},
                 )
                 views = {
@@ -146,12 +151,16 @@ class RunArtifacts:
             self.report["errore_tipo"] = type(error).__name__
         if usage:
             self.report["consumo"] = dict(usage)
+            self.report["richieste_llm_avviate"] = usage.get("metrics", {}).get(
+                "model_requests_started", self.report["richieste_llm_avviate"]
+            )
         if status in {"bozza_da_revisionare", "fallito", "interrotto"}:
             self.report["artefatti_sha256"] = {
                 path.name: sha256(path.read_bytes()).hexdigest()
                 for path in (
                     self.request,
                     self.catalog_path,
+                    self.facts_path,
                     self.partial,
                     self.structured,
                     self.evidences,

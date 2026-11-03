@@ -6,8 +6,7 @@ import json
 import pytest
 
 from codice_tesi import application
-from codice_tesi.discharge.prompts import MISSING_VALUE
-from codice_tesi.discharge.template import load_template
+from codice_tesi.discharge.template import MISSING_VALUE, load_template
 from codice_tesi.discharge.validation import validate_draft
 
 

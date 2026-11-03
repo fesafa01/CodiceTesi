@@ -1,9 +1,12 @@
-# Tracciabilità della bozza: contratto 1.0
+# Tracciabilità della bozza: contratto 1.1
 
-Stato: prima implementazione del 1 novembre 2026, a partire dalla specifica del
-28 ottobre. La generazione richiede il JSON delle 17 sezioni con citazioni e
-produce le viste dopo i controlli tecnici. Una evidenza copre inizialmente una
-fonte completa: la localizzazione è grossolana. Non è una verifica semantica.
+Stato: aggiornamento del 3 novembre 2026, successivo alla prima implementazione
+del 1 novembre. La generazione richiede il JSON delle 17 sezioni con citazioni e
+produce le viste dopo i controlli tecnici. Il catalogo segmenta gli eventi della
+cronologia e i paragrafi delle note lunghe, conservando gli offset originali.
+Il risultato 1.1 aggiunge l'inventario dei fatti documentali; resta leggibile il
+contratto 1.0. Non è una verifica semantica. Per strumenti documentali opzionali,
+limiti, fatti e stato di collaudo si vedano le [integrazioni agentiche](integrazioni-agentiche.md).
 L'esempio JSON allegato resta didattico, senza dati di pazienti, e non proviene
 da Synthea. Il suo stato `not_run` non rappresenta una esecuzione del prototipo.
 
@@ -146,11 +149,12 @@ verifica sul contenuto; la revisione del medico resta necessaria.
 Un riferimento sconosciuto o appartenente a un'altra fonte produce un errore
 tecnico. Non viene eliminato silenziosamente. Si conserva la risposta grezza
 come parziale e non si pubblica la bozza come tecnicamente verificata. Non si
-aggiungono retry o chiamate LLM automatiche.
+aggiungono retry di correzione. Ulteriori richieste sono consentite solo nella
+modalità opzionale con tool documentali, entro i budget configurati.
 
 ## 4. Artefatti previsti
 
-Si mantiene una richiesta al modello per l'intera lettera. L'applicazione
+Il percorso ordinario mantiene una richiesta al modello per l'intera lettera. L'applicazione
 costruisce un risultato locale con questi blocchi, illustrati in
 `tracciabilita.esempio.json`:
 
@@ -181,8 +185,8 @@ Nella cartella della singola esecuzione vengono salvati:
 `risposta.parziale.json` conserva il nome anche quando lo stream termina con
 successo: contiene la risposta grezza esatta e non viene trasformato o eliminato.
 In caso di errore nei riferimenti, JSON invalido o interruzione, non si produce
-`bozza.txt` come risultato completato. In dry-run vengono salvati soltanto
-richiesta, catalogo ed esito, senza avviare il client LLM.
+`bozza.txt` come risultato completato. In dry-run vengono salvati
+richiesta, catalogo, inventario dei fatti ed esito, senza avviare il client LLM.
 
 `richiesta.txt` e il registro attuali restano parte degli artefatti. I contenuti
 del catalogo e delle evidenze seguono la conservazione e il perimetro locale
@@ -199,9 +203,12 @@ richiedere la riconferma dei collegamenti delle sezioni modificate.
 `discharge/provenance.py` definisce catalogo, citazioni, sezioni e risultato, con
 controlli sui riferimenti e renderer delle viste. `prepare_request` costruisce
 il catalogo una sola volta, lo include nel prompt e ne considera il testo nel
-budget, senza troncamenti. Il prompt è `campus-stesura-v14-citazioni`.
+budget, senza troncamenti. La versione del prompt è in `discharge/prompts.py`
+ed è registrata negli artefatti di ogni esecuzione.
 
-`LLMDraftGenerator` mantiene una richiesta, zero tool e zero retry. La risposta
+`LLMDraftGenerator` mantiene una richiesta e zero tool nel percorso ordinario.
+La modalità opzionale abilita quattro tool documentali di sola lettura con budget espliciti,
+senza retry automatici. La risposta finale
 JSON viene analizzata soltanto dopo un completamento normale. `RunArtifacts`
 verifica i riferimenti, renderizza la lettera e applica `validate_draft` prima di
 salvare le viste. Il risultato e l'esito sono legati al run ID del registro;

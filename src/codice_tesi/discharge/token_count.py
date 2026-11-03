@@ -64,3 +64,27 @@ def estimate_input_tokens(
     )
     count = len(_deepseek_tokenizer().encode(rendered, add_special_tokens=False).ids)
     return InputTokenEstimate(count, "deepseek_v4_local_chat_template_v1", TOKENIZER_REVISION)
+
+
+def input_token_breakdown(instructions, prompt, source_texts, config, estimate) -> dict[str, int]:
+    """Conteggi locali separati; differenze approssimate ai confini di tokenizzazione.
+
+    Gli schemi dei tool non fanno parte di questa stima testuale. Non si attribuisce
+    il tokenizer DeepSeek a modelli diversi e non si espongono i testi alle tracce.
+    """
+    if config.model not in DEEPSEEK_MODELS:
+        return {}
+    tokenizer = _deepseek_tokenizer()
+
+    def count(text):
+        return len(tokenizer.encode(text, add_special_tokens=False).ids)
+
+    instruction_tokens, data_tokens = count(instructions), count(prompt)
+    source_tokens = sum(count(text) for text in source_texts)
+    return {
+        "instruction_tokens": instruction_tokens,
+        "data_prompt_tokens": data_tokens,
+        "source_text_tokens_sum": source_tokens,
+        "framing_and_notices_tokens_approx": data_tokens - source_tokens,
+        "chat_template_tokens_approx": estimate - instruction_tokens - data_tokens,
+    }

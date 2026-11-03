@@ -8,10 +8,12 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from codice_tesi.discharge.contracts import Contract
+from codice_tesi.discharge.facts import FactInventory
 from codice_tesi.discharge.models import CompositionPacket, EvidenceSource
-from codice_tesi.discharge.template import MISSING_VALUE, LetterTemplate
+from codice_tesi.discharge.segmentation import SEGMENTATION_VERSION, source_intervals
+from codice_tesi.discharge.template import MISSING_VALUE, LetterTemplate, SectionDefinition
 
-TRACE_SCHEMA_VERSION = "1.0"
+TRACE_SCHEMA_VERSION = "1.1"
 DRAFT_TITLE = "BOZZA DI LETTERA DI DIMISSIONE - DA REVISIONARE"
 
 
@@ -25,6 +27,7 @@ class Evidence(Contract):
 
 
 class EvidenceCatalog(Contract):
+    segmentation_version: str = "fonte-completa-v1"
     sources: tuple[EvidenceSource, ...] = Field(min_length=1)
     evidences: tuple[Evidence, ...] = Field(min_length=1)
 
@@ -51,7 +54,7 @@ class EvidenceCatalog(Contract):
 
 
 def build_catalog(packet: CompositionPacket) -> EvidenceCatalog:
-    """Prima versione: una evidenza per fonte completa, incluso il contesto verificato."""
+    """Passaggi originali deterministici, incluso il contesto verificato."""
     source_ids = {source.id for source in packet.sources}
     index = 1
     while (context_source_id := f"contesto-verificato-{index:04d}") in source_ids:
@@ -75,11 +78,15 @@ def build_catalog(packet: CompositionPacket) -> EvidenceCatalog:
         sha256=sha256(context_text.encode("utf-8")).hexdigest(),
     )
     sources = (*packet.sources, technical_source)
+    intervals = [
+        (source, start, end) for source in sources for start, end in source_intervals(source)
+    ]
     return EvidenceCatalog(
+        segmentation_version=SEGMENTATION_VERSION,
         sources=sources,
         evidences=tuple(
-            Evidence(id=f"evidenza-{i:04d}", source_id=source.id, start=0, end=len(source.text))
-            for i, source in enumerate(sources, 1)
+            Evidence(id=f"evidenza-{i:04d}", source_id=source.id, start=start, end=end)
+            for i, (source, start, end) in enumerate(intervals, 1)
         ),
     )
 
@@ -135,16 +142,31 @@ class TraceValidation(Contract):
 
 
 class TraceResult(Contract):
-    schema_version: Literal["1.0"] = TRACE_SCHEMA_VERSION
+    schema_version: Literal["1.0", "1.1"] = TRACE_SCHEMA_VERSION
     binding: TraceBinding
     catalog: EvidenceCatalog
     draft: StructuredDraft
     validation: TraceValidation
+    facts: FactInventory = Field(default_factory=FactInventory)
 
     @model_validator(mode="after")
     def matching_context(self):
         if any(source.context_id != self.binding.context_id for source in self.catalog.sources):
             raise ValueError("Fonte fuori dal contesto del risultato.")
+        evidences = {e.id: e for e in self.catalog.evidences}
+        fact_ids = {fact.id for fact in self.facts.facts}
+        if len(fact_ids) != len(self.facts.facts):
+            raise ValueError("Fatti documentali duplicati.")
+        for fact in self.facts.facts:
+            evidence = evidences.get(fact.evidence_id)
+            if evidence is None or evidence.source_id != fact.source_id:
+                raise ValueError("Fatto documentale fuori dal catalogo.")
+        for issue in self.facts.issues:
+            if (
+                not set(issue.fact_ids) <= fact_ids
+                or not set(issue.evidence_ids) <= evidences.keys()
+            ):
+                raise ValueError("Rilievo documentale con riferimenti sconosciuti.")
         return self
 
 
@@ -157,9 +179,47 @@ def _unique_json_keys(pairs):
     return result
 
 
+def draft_json_text(raw: str, *, partial: bool = False) -> str:
+    """Accetta solo JSON grezzo o un unico involucro Markdown JSON, senza prosa."""
+    text = raw.strip()
+    if text.startswith("```"):
+        header, opening, body = text.partition("\n")
+        if opening and header.strip().casefold() in {"```", "```json"}:
+            content, closing, trailer = body.rpartition("\n")
+            if closing and trailer.strip() == "```":
+                return content
+            if partial:
+                return body
+    return text
+
+
+def _only_missing_fields(text: str, definition: SectionDefinition) -> bool:
+    """Riconosce solo tutti i campi canonici esplicitamente marcati indisponibili."""
+    labels = {field.label.casefold() for field in definition.fields}
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(labels) != len(definition.fields) or len(lines) != len(labels):
+        return False
+    missing = {"non disponibile", "non disponibile.", MISSING_VALUE.casefold()}
+    seen = set()
+    for line in lines:
+        label, colon, value = line.partition(":")
+        label = label.strip().casefold()
+        if (
+            not colon
+            or label not in labels
+            or label in seen
+            or value.strip().casefold() not in missing
+        ):
+            return False
+        seen.add(label)
+    return seen == labels
+
+
 def parse_draft(raw: str, catalog: EvidenceCatalog, template: LetterTemplate) -> StructuredDraft:
-    """Rifiuta riferimenti invalidi: nessuna eliminazione o riparazione silenziosa."""
-    draft = StructuredDraft.model_validate(json.loads(raw, object_pairs_hook=_unique_json_keys))
+    """Convalida sezioni e riferimenti senza modificare il contenuto del modello."""
+    draft = StructuredDraft.model_validate(
+        json.loads(draft_json_text(raw), object_pairs_hook=_unique_json_keys)
+    )
     if [section.section_id for section in draft.sections] != [s.id for s in template.sections]:
         raise ValueError("Le sezioni JSON devono essere tutte presenti una volta in ordine.")
     sources = {source.id: source for source in catalog.sources}
@@ -168,7 +228,7 @@ def parse_draft(raw: str, catalog: EvidenceCatalog, template: LetterTemplate) ->
         text = section.text.strip()
         if not text and definition.requirement.status in {"required", "unconfirmed"}:
             raise ValueError("Sezione obbligatoria vuota: usare la formula del dato mancante.")
-        if not text or text == MISSING_VALUE:
+        if not text or text == MISSING_VALUE or _only_missing_fields(text, definition):
             if section.sources:
                 raise ValueError("Una sezione vuota o interamente indisponibile non cita fonti.")
         elif not section.sources:
@@ -218,7 +278,7 @@ def render_evidences(result: TraceResult, template: LetterTemplate) -> str:
             "failed": "Controlli tecnici falliti; ",
         }[result.validation.technical]
         + "pertinenza, completezza e correttezza clinica non verificate.",
-        "Localizzazione iniziale: ogni evidenza copre una fonte completa. "
+        "Localizzazione: " + result.catalog.segmentation_version + ". "
         "I riferimenti riguardano questa versione della bozza.",
         "",
     ]

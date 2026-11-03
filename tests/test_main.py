@@ -81,6 +81,7 @@ def test_documented_flags_are_passed_to_application(monkeypatch, thinking_flag, 
     assert calls[0]["backend_url"] == "http://localhost:8001"
     assert calls[0]["context_config"].window_tokens == 24000 and calls[0]["dry_run"]
     assert calls[0]["config"].thinking is expected
+    assert calls[0]["config"].total_timeout is None
 
 
 def test_absent_thinking_flag_respects_python_configuration(monkeypatch):

@@ -2,8 +2,7 @@
 
 import re
 
-from codice_tesi.discharge.prompts import MISSING_VALUE
-from codice_tesi.discharge.template import LetterTemplate
+from codice_tesi.discharge.template import MISSING_VALUE, LetterTemplate
 
 
 def validate_draft(text: str, template: LetterTemplate) -> None:

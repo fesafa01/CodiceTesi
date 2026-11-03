@@ -112,7 +112,7 @@ Il dry-run non interroga la sonda.
 
 ## Registro e Phoenix
 
-Durante la chiamata LLM il client legge `/snapshot` ogni secondo, con timeout di
+Durante il ciclo agente il client legge `/snapshot` ogni secondo, con timeout di
 un secondo. Rifiuta campioni vecchi di oltre 10 secondi o oltre 5 secondi nel
 futuro, schemi non supportati, valori non finiti/negativi e serie duplicate.
 Scarta campioni precedenti alla richiesta e duplicati, segnala cambi di
@@ -139,7 +139,7 @@ riepilogo; i campioni già scritti restano su disco anche dopo SIGKILL.
 La chiusura può aggiungere fino al timeout della sonda alla fase di generazione;
 la durata LLM dell'adattatore resta quella della richiesta al provider.
 
-Phoenix mostra su span radice e LLM `tesi.hardware.status`, `samples`, `host`,
+Phoenix mostra su span radice e AGENT `tesi.hardware.status`, `samples`, `host`,
 `scope`, `attribution`, `statistics` (JSON con minimo/massimo/media e unità).
 I campioni grezzi restano locali; CSV/JSONL del registro includono `hardware`.
 

@@ -213,6 +213,11 @@ def test_trace_and_registry_correlate_without_content_or_duplicate_llm_spans(
     root = next(s for s in spans if s.name == "discharge.execution")
     assert root.attributes["tesi.run_id"] == record["run_id"]
     llm = next(s for s in spans if s.attributes.get("openinference.span.kind") == "LLM")
+    agent = next(s for s in spans if s.name == "discharge.agent_run")
+    assert agent.attributes["tesi.prompt.instruction_tokens"] > 0
+    assert agent.attributes["tesi.prompt.source_text_tokens_sum"] > 0
+    assert agent.attributes["tesi.agent.request_count"] == 1
+    assert llm.parent.span_id == agent.context.span_id
     assert llm.attributes["llm.token_count.completion"] == 40
     assert llm.attributes["gen_ai.usage.reasoning.output_tokens"] == 10
     assert "llm.token_count.completion" not in root.attributes
@@ -409,7 +414,7 @@ def test_hardware_is_correlated_and_failure_does_not_change_generation(
     assert measured["samples"] == (1 if probe_available else 0)
     assert "cost_estimate" not in measured
     spans = exporter.get_finished_spans()
-    for span in (s for s in spans if s.name == "discharge.execution" or s.kind.name == "CLIENT"):
+    for span in (s for s in spans if s.name in {"discharge.execution", "discharge.agent_run"}):
         assert span.attributes["tesi.hardware.status"] == measured["status"]
     if probe_available:
         assert measured["statistics"][0]["mean"] == 55
@@ -417,3 +422,60 @@ def test_hardware_is_correlated_and_failure_does_not_change_generation(
     dumped = json.dumps(record) + "\n".join(s.to_json() for s in spans)
     assert "PRIVATE_HARDWARE_ERROR" not in dumped
     assert "PRIVATE_MODEL_ERROR" not in dumped
+
+
+def test_prometheus_records_requests_once_and_cycle_separately(monkeypatch):
+    from types import SimpleNamespace
+
+    spans = InMemorySpanExporter()
+    metrics = MemoryMetrics()
+    monkeypatch.setattr(observability, "OTLPSpanExporter", lambda **kwargs: spans)
+    monkeypatch.setattr(observability, "OTLPMetricExporter", lambda **kwargs: metrics)
+    telemetry = observability.Telemetry(TelemetryConfig(enabled=True, _env_file=None))
+    record = SimpleNamespace(
+        data={
+            "status": "completed",
+            "dry_run": False,
+            "model_config": ModelConfig().model_dump(),
+            "timings": {"total_seconds": 12},
+            "llm": {
+                "cycle_duration_seconds": 10,
+                "model_requests_started": 2,
+                "input_tokens": 270,
+                "output_tokens": 50,
+                "requests": [
+                    {
+                        "request_duration_seconds": 4,
+                        "usage_complete": True,
+                        "usage_issues": [],
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                    },
+                    {
+                        "request_duration_seconds": 5,
+                        "usage_complete": True,
+                        "usage_issues": [],
+                        "input_tokens": 170,
+                        "output_tokens": 30,
+                    },
+                ],
+            },
+        }
+    )
+    telemetry.record_metrics(record)
+    telemetry.close()
+    instruments = {
+        metric.name: metric
+        for batch in metrics.exports
+        for resource in batch.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+    }
+    tokens = instruments["gen_ai.client.token.usage"].data.data_points
+    assert sum(p.count for p in tokens) == 4
+    assert sum(p.sum for p in tokens if p.attributes["gen_ai.token.type"] == "input") == 270
+    assert sum(p.sum for p in tokens if p.attributes["gen_ai.token.type"] == "output") == 50
+    duration = instruments["gen_ai.client.operation.duration"].data.data_points
+    assert sum(p.count for p in duration) == 2 and sum(p.sum for p in duration) == 9
+    cycle = instruments["tesi.agent.duration"].data.data_points
+    assert sum(p.count for p in cycle) == 1 and sum(p.sum for p in cycle) == 10

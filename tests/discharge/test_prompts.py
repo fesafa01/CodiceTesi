@@ -82,10 +82,10 @@ def test_budget_reserves_full_output_and_safety_margin_at_exact_boundary(packet_
     output, margin = 32768, 1024
     request = prepare_request(packet, ContextConfig(), output_tokens=output)
     required = request.input_tokens_estimate + output + margin
-    assert (
-        prepare_request(packet, ContextConfig(window_tokens=required), output_tokens=output)
-        == request
-    )
+    boundary = prepare_request(packet, ContextConfig(window_tokens=required), output_tokens=output)
+    assert boundary.prompt == request.prompt and boundary.instructions == request.instructions
+    assert boundary.input_tokens_estimate == request.input_tokens_estimate
+    assert boundary.window_tokens == required
     with pytest.raises(ValueError, match="Nessuna nota è stata troncata"):
         prepare_request(packet, ContextConfig(window_tokens=required - 1), output_tokens=output)
 
@@ -124,3 +124,22 @@ def test_other_models_keep_explicit_conservative_fallback(packet_factory):
     )
     assert request.input_estimate_method == "utf8_json_bytes_plus_512_not_tokenizer_count"
     assert request.input_tokenizer_revision is None
+
+
+def test_input_breakdown_counts_text_separately_and_is_not_claimed_for_other_models(packet_factory):
+    packet = packet_factory("nota", text="Testo originale da conservare.")
+    request = prepare_request(packet, ContextConfig(), output_tokens=100)
+    counts = request.input_tokens_breakdown
+    assert counts["source_text_tokens_sum"] > 0
+    assert counts["data_prompt_tokens"] > counts["source_text_tokens_sum"]
+    assert (
+        sum(
+            counts[k]
+            for k in ("instruction_tokens", "data_prompt_tokens", "chat_template_tokens_approx")
+        )
+        == request.input_tokens_estimate
+    )
+    other = prepare_request(
+        packet, ContextConfig(), output_tokens=100, model_config=ModelConfig(model="other-model")
+    )
+    assert other.input_tokens_breakdown == {}

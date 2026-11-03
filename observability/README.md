@@ -184,13 +184,13 @@ in corso: selezionare stati e modalità prima di calcolare statistiche scientifi
 
 ## Definizioni delle misure
 
-| Campo `llm` del registro | Significato |
+| Campo di `llm.requests[]` del registro | Significato |
 |---|---|
 | `request_duration_seconds` | Durata della richiesta di modello fino alla chiusura dello stream, osservata dal client |
 | `time_to_first_chunk_seconds` | Primo chunk strutturato ricevuto dall'adattatore, anche se contiene soltanto il ruolo |
 | `time_to_first_content_seconds` | Primo contenuto di testo o reasoning, compreso whitespace |
 | `time_to_first_reasoning_seconds` | Primo reasoning non vuoto nei campi supportati |
-| `time_to_first_text_seconds` | Primo testo non vuoto della lettera |
+| `time_to_first_text_seconds` | Primo testo non vuoto della risposta, anche un preambolo prima di un tool |
 | `time_to_last_content_seconds` | Ultimo contenuto osservato, distinto dal chunk finale di usage |
 | `content_chunk_gap_mean_seconds` / `max` | Distanze tra chunk con contenuto; non latenza tra token |
 | `input_tokens` / `output_tokens` | Conteggi dello snapshot usage del server |
@@ -198,6 +198,9 @@ in corso: selezionare stati e modalità prima di calcolare statistiche scientifi
 | `visible_output_tokens` | Output meno reasoning, se entrambi disponibili e coerenti con il contratto Chat Completions |
 | `total_tokens` / `calculated_total_tokens` | Totale dichiarato e somma input/output, conservati separatamente |
 | `cached_input_tokens` | Conteggio riportato nei dettagli di input, se disponibile |
+| `uncached_input_tokens` | Input meno cache dichiarata, solo se entrambi disponibili e coerenti; non misura il lavoro fisico della GPU |
+| `request` | Indice, parametri della richiesta, numero di tool definiti, struttura della storia e controllo finale in coda |
+| `finish_reason` / `tool_calls_requested` | Termine della singola risposta e numero di tool call emesse |
 | `output_tokens_per_request_second` | Output token / durata della richiesta client, per stream completati e usage coerente |
 | `server_reported_timings` | Solo campi numerici noti dell'oggetto `timings`, quando presente |
 | `server_decode_tokens_per_second` | `predicted_n / predicted_ms * 1000`, solo se questi campi sono riportati dal backend |
@@ -227,17 +230,56 @@ rete nel server documentale. Il tempo di revisione medica non è misurato da que
 
 ## Phoenix: che cosa guardare
 
-Aprire il progetto `tesi-dimissioni`. Ogni trace ha uno span radice
-`discharge.execution`, span delle fasi e uno span `LLM` della chiamata.
-`tesi.run_id` collega la trace al record locale. Nei metadati radice sono disponibili
-esperimento, configurazione e hash del codice; nello span LLM modello, contatori
-supportati, tempo al primo chunk e tempo al primo testo.
+Aprire il progetto `tesi-dimissioni`. `tesi.run_id` collega la trace al record
+locale. Le nuove esecuzioni distinguono tre livelli:
 
-Non sono presenti span automatici duplicati del framework: gli span sono espliciti
-OTel, con attributi GenAI e OpenInference per la lettura in Phoenix. I token sono
-attribuiti una volta sola allo span LLM. Nessun costo monetario viene calcolato per
-il modello locale. `flush_completed` certifica soltanto che il flush SDK ha
-terminato: non è una ricevuta di persistenza in Phoenix.
+```text
+discharge.execution                         CHAIN
+└─ generate_draft                           CHAIN
+   └─ discharge.agent_run                   AGENT
+      ├─ chat.request.1                     LLM
+      ├─ tool riepiloga_osservazioni         TOOL
+      └─ chat.request.2                     LLM
+```
+
+Solo gli span `LLM` hanno `llm.token_count.*` e `gen_ai.usage.*`: ogni richiesta
+contribuisce una sola volta ai totali standard di Phoenix. Il padre `AGENT` ha
+riepiloghi applicativi separati. Anche senza tool esistono un padre AGENT e un
+figlio LLM. Le trace storiche conservano la precedente struttura aggregata e
+non vengono riscritte.
+
+| Gruppo | Contenuto |
+|---|---|
+| AGENT `tesi.prompt.*` | Stima iniziale locale e sua separazione in istruzioni, fonti e framing, numero di fonti/passaggi; `full_context=true` |
+| AGENT `tesi.agent.usage.*` | Totali di input/output/cache, input della prima richiesta, massimo input di una singola richiesta e somma degli input successivi |
+| AGENT `tesi.agent.timing.*` | Durata del ciclo, somma delle durate dei provider, intervalli tra richieste, primo testo qualsiasi e primo testo della risposta finale |
+| AGENT `tesi.agent.tools.*` | Tentativi, rifiuti e operazioni eseguite/completate/fallite |
+| LLM `tesi.request.context.*` | Stima locale, modalità della storia (`final_append` nella fase finale), strategia del prefisso, conteggi di messaggi, risultati dei tool e feedback di correzione |
+| LLM `tesi.request.tools.*` | Definizioni presenti e `execution_enabled`: nella fase finale gli schemi restano stabili ma le operazioni sono bloccate |
+| LLM `tesi.request.budget.*` | Massimo output di quella richiesta e motivo del passaggio alla fase finale |
+| LLM `tesi.request.reasoning.*` / `sampling.*` | Parametri passati per quella richiesta; non i soli massimali di configurazione |
+| LLM `tesi.request.cache.*` | Dato del provider: `unreported`, `reported_zero`, `reported_reuse` o `inconsistent` |
+| LLM `tesi.request.timing.*` / `stream.*` | Tempi e contatori del singolo stream; `phase` distingue selezione tool, risposta finale e stream incompleto |
+| TOOL `tesi.tool.request_index` | Indice della richiesta che ha originato la chiamata |
+
+`tesi.prompt.instruction_tokens`, `data_prompt_tokens` e
+`source_text_tokens_sum` sono conteggi con il tokenizer locale supportato.
+`framing_and_notices_tokens_approx` e `chat_template_tokens_approx` sono
+differenze approssimate: i confini di tokenizzazione incidono sul conteggio.
+Non includono gli schemi dei tool e non vengono esposti per modelli il cui
+tokenizer non è disponibile. Il consumo effettivo resta quello del provider.
+
+Esempio: 42.262 token nella prima richiesta e 44.097 nella seconda diventano
+86.359 token di input totali; il massimo contesto osservato in una singola
+richiesta resta 44.097. `subsequent_request_input_tokens_total` non misura token
+nuovi, né quantifica esattamente testo duplicato: conta gli input delle richieste
+successive. La cache è una dichiarazione del serving, non una misura indipendente
+delle operazioni GPU. Un dato assente resta sconosciuto e non diventa zero.
+
+Gli span sono espliciti OTel, senza auto-instrumentazione duplicata del framework.
+Nessun costo monetario viene calcolato per il modello locale. `flush_completed`
+certifica soltanto che il flush SDK ha terminato: non è una ricevuta di
+persistenza in Phoenix.
 
 Prompt, output, fonti, identificativi di paziente/episodio e reasoning non sono
 esportati. Per le eccezioni si esporta soltanto il tipo, senza messaggio o stack
@@ -273,8 +315,11 @@ Metriche principali:
 - `tesi.llm.reasoning_tokens`: dettaglio separato, da non sommare nuovamente all'output;
 - `tesi.llm.output_tokens_per_request_second`: distribuzione della velocità client per richiesta.
 
-I conteggi token entrano negli aggregati solo quando lo stream è concluso, usage è
-disponibile e i contatori sono coerenti; i record conservano anche le misure parziali.
+Le metriche GenAI sono registrate per singola richiesta; la somma dei token non
+viene registrata nuovamente come un altro campione. `tesi.agent.duration` e
+`tesi.agent.requests` misurano separatamente durata del ciclo e numero di richieste.
+I conteggi token entrano negli aggregati solo per stream conclusi, con usage
+disponibile e coerente; i record conservano anche le misure parziali.
 Phoenix riceve **tracce**, Prometheus **metriche**: gli istogrammi non vengono inviati
 a Phoenix come se fosse un database di metriche.
 
@@ -337,3 +382,40 @@ Riferimenti tecnici consultati il 23 ottobre 2026:
 [convenzioni GenAI](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/model/gen-ai/metrics.yaml).
 Le convenzioni GenAI sono ancora in evoluzione; il registro ha uno schema proprio
 versionato e non dipende dall'organizzazione interna del database Phoenix.
+
+## Cicli con strumenti documentali
+
+`llm.requests[]` conserva le misure per ogni richiesta, anche per il percorso
+senza tool. I campi al livello `llm` conservano gli aggregati del ciclo per
+compatibilità; `cycle_duration_seconds` ne rende esplicita la durata.
+`provider_requests_duration_seconds` somma i singoli stream e
+`between_requests_seconds` comprende tool, preparazione e altro lavoro del client:
+non è una misura esclusiva del tempo dei tool. I token aggregati sommano ogni
+richiesta una sola volta; se manca un contatore l'aggregato rimane sconosciuto.
+`measurement_boundary=agent_run_client` distingue il tempo complessivo del ciclo,
+che comprende gli intervalli dei tool, dal tempo della singola richiesta.
+Il primo testo può essere un preambolo precedente a un tool: non equivale alla
+disponibilità della lettera finale.
+
+Ogni tool documentale eseguito produce uno span figlio del padre AGENT,
+nella stessa trace, con `openinference.span.kind=TOOL` e `tool.name`.
+Phoenix mostra nome, durata e stato; gli attributi `tesi.tool.*` aggiungono indice della richiesta e indice
+della chiamata, esito, numero dei risultati, corrispondenze totali, byte restituiti e indicazione
+di risultati limitati. Gli errori hanno stato `ERROR` e solo il tipo
+dell'eccezione, senza messaggio. Query, argomenti, ID delle evidenze, testo e
+risultati completi non vengono esportati. L'audit dettagliato degli ID consultati
+rimane nell'esito locale.
+
+Le chiamate rifiutate prima della funzione hanno uno span `TOOL` separato,
+`tesi.tool.status=rejected`, `tesi.tool.arguments_valid=false` e
+`tesi.tool.attempt_index`. Il nome viene esportato solo se appartiene ai quattro
+tool autorizzati; altrimenti è `tool_sconosciuto`. Il registro distingue questi
+tentativi (`tools.attempts`) dalle operazioni effettive (`tools.calls`). Una
+correzione guidata consuma i budget esistenti e non è un retry di trasporto.
+
+Le scelte reasoning/tool sono salvate nel registro e nella metadata della trace,
+oltre agli attributi `tesi.thinking` e `tesi.tools_enabled` sullo span radice.
+Il testo interno del reasoning non viene esportato; tempi e token restano
+disponibili quando il serving li riporta. Senza tool abilitati o senza operazioni
+richieste dal modello, non compaiono span `TOOL`. Non è necessaria
+l'auto-instrumentazione del framework.

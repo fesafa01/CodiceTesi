@@ -10,7 +10,7 @@ Il prototipo produce una bozza da fonti documentali, con inferenza sullo Spark e
 | Autonomia in esercizio | Servizi locali e collegamento allo Spark configurati. | **A1:** avvio, inferenza e riavvio con uscita esterna bloccata su entrambi gli host. | Prova di rete completa; endpoint locali e dry-run non dimostrano autonomia offline. |
 | Identità e ripristino | Lock Python, hash di codice e richieste, metadati delle esecuzioni. | **R1:** ricostruzione isolata da un archivio interno. | Manifest effettivo di pesi/tokenizer/runtime, licenze, immagini e ripristino completo. |
 | Qualità documentale | Template, controlli delle intestazioni/istologico e del budget. | **Q1:** invarianti su sintetici, copertura e affermazioni supportate. | Annotazioni semantiche e valutazione clinica; il formato valido non prova correttezza. |
-| Contenimento | Nessun tool del modello; accesso in lettura; parziali e fallimenti conservati. | **C1:** contratti/privilegi. **C2:** istruzioni spurie e arresto del serving. | Prove sul modello e conferma del rilascio delle risorse sullo Spark. |
+| Contenimento | Tool opzionali di sola lettura sullo snapshot; parziali e fallimenti conservati. | **C1:** contratti/privilegi e isolamento dei tool. **C2:** istruzioni spurie e arresto del serving. | Prove sul modello e conferma del rilascio delle risorse sullo Spark. |
 | Portabilità | Endpoint e modello configurabili; contratto comune. | **P1:** sostituzione controllata e nuova valutazione. | Secondo checkpoint/runtime, flag adattati e confronto di qualità/costo. |
 | Sostenibilità | Registro di tempi, usage quando disponibile e fallimenti. | **S1:** carico/risorse. **S2:** indisponibilità/recupero. | Misure hardware e prove di servizio reale, oltre ai mock. |
 

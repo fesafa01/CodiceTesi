@@ -242,7 +242,7 @@ class HardwareObservation:
             "schema_version": "1.0",
             "enabled": self.config.enabled,
             "status": status,
-            "scope": "spark_host_during_client_llm_request",
+            "scope": "spark_host_during_agent_run",
             "attribution": "shared_host_not_exclusive_to_request",
             "started_at": self.started_at,
             "ended_at": self.ended_at,

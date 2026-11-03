@@ -2,10 +2,10 @@
 
 GET /v1/models: elenco dei modelli con client.models.list().
 POST /v1/chat/completions: generazione tramite l'adattatore OpenAIChatModel.
-PydanticAI invia una sola richiesta per la stesura, con reasoning opzionale.
+Il generatore gestisce stesura ed elaborazioni documentali opzionali sullo snapshot della degenza.
 """
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from time import monotonic
 
 from openai import AsyncOpenAI
@@ -14,7 +14,7 @@ from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from codice_tesi.config import ModelConfig, Settings
-from codice_tesi.observability.stream_metrics import active_observation
+from codice_tesi.observability.stream_metrics import RunStreamObservation, active_observation
 
 
 class MeasuredStreamedResponse(OpenAIStreamedResponse):
@@ -30,19 +30,59 @@ class MeasuredChatModel(OpenAIChatModel):
         return MeasuredStreamedResponse
 
     @asynccontextmanager
-    async def request_stream(self, *args, **kwargs):
-        observation = active_observation.get()
-        if observation is not None:
+    async def request_stream(
+        self, messages, model_settings, model_request_parameters, run_context=None
+    ):
+        run_observation = active_observation.get()
+        observation = run_observation
+        token = None
+        if isinstance(observation, RunStreamObservation):
+            settings = model_settings or {}
+            parts = [part for message in messages for part in message.parts]
+            metadata = {
+                "tools_available": len(model_request_parameters.function_tools),
+                "history_messages": len(messages),
+                "user_parts": sum(p.part_kind == "user-prompt" for p in parts),
+                "tool_return_parts": sum(p.part_kind == "tool-return" for p in parts),
+                "retry_parts": sum(p.part_kind == "retry-prompt" for p in parts),
+                "assistant_tool_calls": sum(p.part_kind == "tool-call" for p in parts),
+            }
+            for field in ("max_tokens", "temperature", "top_p"):
+                if type(settings.get(field)) in (int, float):
+                    metadata[field] = settings[field]
+            effort = settings.get("openai_reasoning_effort")
+            if effort in {"none", "off", "minimal", "low", "medium", "high", "max"}:
+                metadata["reasoning_effort"] = effort
+            thinking = (settings.get("extra_body") or {}).get("thinking", {}).get("type")
+            if thinking in {"enabled", "disabled"}:
+                metadata["thinking"] = thinking == "enabled"
+            observation = observation.begin(metadata)
+            token = active_observation.set(observation)
+        elif observation is not None:
             observation.start()
+        context = (
+            run_observation.trace_request(observation)
+            if isinstance(run_observation, RunStreamObservation) and run_observation.trace_request
+            else nullcontext()
+        )
         try:
-            async with super().request_stream(*args, **kwargs) as response:
-                yield response
+            with context:
+                try:
+                    async with super().request_stream(
+                        messages, model_settings, model_request_parameters, run_context
+                    ) as response:
+                        yield response
+                    if observation is not None:
+                        observation.provider_complete = True
+                finally:
+                    if observation is not None:
+                        observation.ended = monotonic()
         finally:
-            if observation is not None:
-                observation.ended = monotonic()
+            if token is not None:
+                active_observation.reset(token)
 
 
-def create_client(settings: Settings, *, streaming: bool = False) -> AsyncOpenAI:
+def create_client(settings: Settings) -> AsyncOpenAI:
     """Anche lo stream scade se il server non invia dati per settings.timeout secondi."""
     return AsyncOpenAI(
         base_url=str(settings.base_url),

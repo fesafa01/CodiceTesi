@@ -22,6 +22,14 @@ class ModelConfig(BaseModel):
     reasoning_effort: str | None = Field(default="low", min_length=1)
     # Prima del testo, ogni evento di reasoning rinnova questo limite di inattività.
     first_text_timeout: float = Field(default=240, gt=0)
+    # Nessuna durata massima, salvo un limite richiesto esplicitamente.
+    total_timeout: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    tools_enabled: bool = False
+    max_requests: int = Field(default=4, ge=1, le=10)
+    max_tool_calls: int = Field(default=6, ge=1, le=30)
+    tool_validation_retries: int = Field(default=1, ge=0, le=1)
+    max_tool_result_bytes: int = Field(default=24000, ge=1024, le=100000)
+    total_tokens_limit: int = Field(default=120000, gt=0)
 
     def request_settings(self) -> OpenAIChatModelSettings:
         """Traduce i nomi del server nei campi PydanticAI, omettendo quelli non impostati."""

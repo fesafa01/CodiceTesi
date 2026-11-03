@@ -140,6 +140,7 @@ class ExecutionRecord:
                 "evidence_count": len(request.catalog.evidences),
                 "catalog_sha256": canonical_hash(request.catalog.model_dump(mode="json")),
                 "input_tokens_estimate": request.input_tokens_estimate,
+                "input_tokens_breakdown": request.input_tokens_breakdown,
                 "input_estimate_method": request.input_estimate_method,
                 "input_tokenizer_revision": request.input_tokenizer_revision,
                 "context_config": context_config.model_dump(mode="json"),
