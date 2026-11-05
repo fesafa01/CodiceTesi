@@ -278,7 +278,6 @@ def test_real_client_tool_roundtrip_omits_narration_and_aggregates_usage(
         backend_url="http://test",
         output_dir=tmp_path,
         packet=packet,
-        console=False,
         config=ModelConfig(tools_enabled=True, max_tokens=8192, max_requests=max_requests),
     )
     if max_requests == 1:
@@ -457,7 +456,6 @@ def test_large_context_reserves_the_next_response_for_final_text(
                 text="Dolore da tre giorni.\n"
                 "2026-11-01 | Observation | Sodio | final | 139 mmol/L\n",
             ),
-            console=False,
             config=ModelConfig(thinking=False, tools_enabled=True),
         )
     )
@@ -562,7 +560,6 @@ def test_invalid_tool_arguments_are_corrected_once_and_audited_without_content(
         backend_url="http://test",
         output_dir=tmp_path,
         packet=packet_factory("nota"),
-        console=False,
         config=ModelConfig(thinking=False, tools_enabled=True, max_tokens=8192),
     )
     if repair:
@@ -651,7 +648,6 @@ def test_application_deadline_includes_packet_fetch_and_records_failure(monkeypa
                 backend_url="http://test",
                 output_dir=tmp_path,
                 config=ModelConfig(total_timeout=0.03),
-                console=False,
             )
         )
     record = json.loads(next((tmp_path / "registro").glob("*.json")).read_text())
@@ -771,7 +767,6 @@ def test_final_phase_keeps_prefix_and_blocks_more_reads_without_model_retry(
                 backend_url="http://fixture",
                 packet=packet_factory("nota"),
                 output_dir=tmp_path,
-                console=False,
                 config=ModelConfig(
                     model=model, tools_enabled=True, max_requests=2, max_tokens=8192
                 ),

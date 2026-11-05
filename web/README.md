@@ -89,7 +89,7 @@ In modalità MIMIC, web e API richiedono la credenziale del file privato
 token Bearer.
 Non sono presenti credenziali LLM nel browser. Le altre variabili server sono
 `APP_BACKEND_URL`, `AGENT_API_URL` e `REFERENCE_API_URL`. agent-api legge la configurazione LLM e
-l’osservabilità già usate dal client CLI.
+l’osservabilità del generatore.
 
 Snapshot e stati web sono in `output/dimissioni-mimic/web-sessions/<uuid>/`
 per MIMIC.

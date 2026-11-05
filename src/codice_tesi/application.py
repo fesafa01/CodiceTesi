@@ -43,7 +43,6 @@ async def run_application(
     seed: int | None = None,
     context_id: str | None = None,
     dry_run: bool = False,
-    console: bool = True,
     settings: Settings | None = None,
     config: ModelConfig | None = None,
     context_config: ContextConfig | None = None,
@@ -53,10 +52,6 @@ async def run_application(
     on_text: Callable[[str, bool], None] | None = None,
     catalog: EvidenceCatalog | None = None,
 ) -> Path:
-    def emit(*args, **kwargs):
-        if console:
-            print(*args, **kwargs)
-
     if packet is not None:
         if context_id is not None and context_id != packet.context.id:
             raise ValueError("Il pacchetto preparato appartiene a un altro contesto.")
@@ -139,19 +134,7 @@ async def run_application(
                         record.bind(packet, request, artifacts, context_config)
                     root.set_attribute("tesi.request_sha256", record.data["request_sha256"])
                     root.set_attribute("tesi.dataset_version", packet.context.dataset_version)
-                    emit(f"Contesto: {packet.context.id} ({packet.context.scope})", flush=True)
-                    emit(f"Cartella: {artifacts.directory}", flush=True)
-                    emit(f"Esecuzione: {record.data['run_id']}", flush=True)
-                    emit(
-                        f"Note nel contesto: {len(packet.sources)}; "
-                        f"campi Campus: {len(packet.template.sections)}; "
-                        "richieste LLM massime: "
-                        f"{config.max_requests if config.tools_enabled else 1}; "
-                        f"thinking={'attivo' if config.thinking else 'disattivo'}",
-                        flush=True,
-                    )
                     if dry_run:
-                        emit(f"Richiesta pronta: {artifacts.request}", flush=True)
                         record.finish("prepared")
                         return artifacts.directory
                     model_settings = settings or Settings().for_model(config.model)
@@ -164,11 +147,6 @@ async def run_application(
                         raise ValueError(
                             "Per MIMIC usare un serving locale o lo Spark configurato."
                         )
-                    emit(
-                        "Redazione delle sezioni e citazioni in JSON. "
-                        "Ctrl+C conserva la risposta parziale.\n",
-                        flush=True,
-                    )
                     record.data["status"] = "running"
                     record.save()
                     with artifacts.open_draft(
@@ -212,8 +190,6 @@ async def run_application(
                                                     output.flush()
                                                     if on_text:
                                                         on_text(chunk, config.tools_enabled)
-                                                    if packet.context.dataset != MIMIC_DATASET:
-                                                        emit(chunk, end="", flush=True)
                                         finally:
                                             metrics = generator.usage.get("metrics", {})
                                             agent_span.set_attributes(
@@ -232,8 +208,6 @@ async def run_application(
                     record.data["draft_sha256"] = sha256(artifacts.draft.read_bytes()).hexdigest()
                     record.data["artifact_hashes"] = dict(artifacts.report["artefatti_sha256"])
                     record.finish("completed", llm=generator.usage.get("metrics"))
-                    emit(f"\n\nBozza salvata: {artifacts.draft}", flush=True)
-                    emit(f"Fonti per sezione: {artifacts.evidences}", flush=True)
                     return artifacts.directory
             except BaseException as exc:
                 interrupted = isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt))
@@ -253,10 +227,6 @@ async def run_application(
                         "interrotto" if interrupted else "fallito",
                         error=exc,
                         usage=generator.usage if generator else None,
-                    )
-                    emit(
-                        f"\nRedazione non completata. Testo parziale: {artifacts.partial}",
-                        flush=True,
                     )
                 raise
             finally:

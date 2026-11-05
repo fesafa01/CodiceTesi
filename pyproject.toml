@@ -18,7 +18,6 @@ dependencies = [
 ]
 
 [project.scripts]
-tesi-agent = "codice_tesi.main:main"
 tesi-backend = "codice_tesi.backend.cli:main"
 
 [project.optional-dependencies]

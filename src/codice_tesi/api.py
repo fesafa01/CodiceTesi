@@ -94,13 +94,6 @@ def create_client(settings: Settings) -> AsyncOpenAI:
     )
 
 
-async def list_models(settings: Settings) -> list[str]:
-    """GET /v1/models: restituisce gli ID, chiudendo il client dopo la richiesta."""
-    async with create_client(settings) as client:
-        response = await client.models.list()
-        return [model.id for model in response.data]
-
-
 def create_model(config: ModelConfig, client: AsyncOpenAI) -> OpenAIChatModel:
     """Adattatore per i POST /v1/chat/completions del generatore della lettera."""
     return MeasuredChatModel(

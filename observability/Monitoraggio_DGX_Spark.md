@@ -2,7 +2,7 @@
 
 ## Raccolta automatica a fine prova
 
-Per le generazioni avviate sul DGX Spark da CLI o da CAMPUS, il workflow salva
+Per le generazioni avviate sul DGX Spark da CAMPUS, il workflow salva
 automaticamente `spark/RUN_ID.json` nella stessa cartella di output che contiene
 `registro/RUN_ID.json`. Per esempio, in CAMPUS con MIMIC il file è in
 `output/dimissioni-mimic/spark/`. Nel registro, `spark_monitor` indica il percorso
@@ -11,7 +11,7 @@ quando lo storico è disponibile. Il file include anche le risposte del monitor
 per la finestra richiesta, di almeno 15 minuti e più ampia per le prove lunghe.
 
 La raccolta avviene dopo la chiusura della prova e include i tentativi di
-inferenza falliti o interrotti. Le anteprime `--dry-run` e le prove su altri
+inferenza falliti o interrotti. Le anteprime e le prove su altri
 host saltano la raccolta. Un endpoint in errore è indicato in `errors`; i dati
 ricevuti dall'altro endpoint restano disponibili. La richiesta invia solo la
 finestra temporale al monitor. Il `run_id` e l'associazione restano locali.

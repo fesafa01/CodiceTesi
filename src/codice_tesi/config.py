@@ -16,7 +16,7 @@ OLLAMA_MODELS = frozenset({QWEN_MODEL, GEMMA_MODEL})
 
 
 def default_output_dir() -> Path:
-    """Condivide il percorso dei tentativi tra la CLI e l'API web."""
+    """Restituisce il percorso degli artefatti dell'API web."""
     mimic = bool(os.getenv("APP_MIMIC_TOKEN"))
     if output_root := os.getenv("TESI_OUTPUT_DIR"):
         root = Path(output_root).expanduser()

@@ -2,32 +2,6 @@ include:
   - ./observability/compose.yaml
 
 services:
-  app:
-    image: codice-tesi:local
-    # Il client CLI esegue una generazione e deve partire solo su richiesta.
-    profiles: ["cli"]
-    build: .
-    init: true
-    env_file:
-      - path: .env
-        required: false
-      - path: ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/var/mimic/access.env
-        required: false
-    environment:
-      TESI_OUTPUT_DIR: /app/output
-      APP_BACKEND_URL: http://backend:8001
-      TELEMETRY_ENABLED: "true"
-      TELEMETRY_ENDPOINT: http://otel-collector:4318
-      TELEMETRY_PROJECT: tesi-dimissioni
-    volumes:
-      - ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/output:/app/output
-      - ./experiments:/app/experiments:ro
-    depends_on:
-      backend:
-        condition: service_healthy
-      otel-collector:
-        condition: service_started
-
   agent-api:
     image: codice-tesi-agent-api:local
     build:

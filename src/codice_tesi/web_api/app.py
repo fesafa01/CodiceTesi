@@ -1,4 +1,4 @@
-"""Adattatore HTTP del generatore CLI, con snapshot e stato durevole su disco.
+"""API HTTP del generatore, con snapshot e stato durevole su disco.
 
 Un processo Uvicorn, una generazione attiva. I POST ripetuti restituiscono lo
 stesso lavoro; dopo un riavvio quelli incompleti diventano interrotti.
@@ -170,7 +170,6 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
                 backend_url=backend,
                 output_dir=output,
                 packet=packet,
-                console=False,
                 catalog=catalog_at(directory, packet),
                 config=ModelConfig(
                     model=Settings().model,
@@ -207,7 +206,7 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
                 detail=(
                     f"Il modello non ha inviato progressi per {exc.seconds:g} secondi. "
                     "Il serving potrebbe essere occupato o la richiesta in coda. "
-                    "Verificare eventuali generazioni già attive, anche da CLI, "
+                    "Verificare eventuali generazioni già attive "
                     "prima di preparare un nuovo tentativo."
                 ),
             )

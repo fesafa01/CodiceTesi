@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from pathlib import Path
 
 import httpx2 as httpx
 import pytest
@@ -31,7 +30,7 @@ def sse(text, finish=None):
 @pytest.mark.parametrize("thinking", [False, True])
 @pytest.mark.parametrize("model", [DEEPSEEK_MODEL, QWEN_MODEL, GEMMA_MODEL])
 def test_single_http_call_streams_before_completion_and_flushes_same_file(
-    packet_factory, tmp_path, monkeypatch, capsys, thinking, model, letter_factory, response_factory
+    packet_factory, tmp_path, monkeypatch, thinking, model, letter_factory, response_factory
 ):
     packet = packet_factory("triage", "anamnesi")
     calls = []
@@ -104,7 +103,6 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
                         break
                     await asyncio.sleep(0.01)
             assert not task.done()
-            assert response[:30] in capsys.readouterr().out
             release.set()
             directory = await asyncio.wait_for(task, 2)
         finally:
@@ -518,16 +516,3 @@ def test_oversized_notes_fail_before_creating_client(packet_factory, tmp_path, m
     with pytest.raises(ValueError, match="Nessuna nota è stata troncata"):
         asyncio.run(application.run_application(backend_url="http://test", output_dir=tmp_path))
     assert not list(tmp_path.rglob("bozza.txt"))
-
-
-def test_default_cli_still_runs_document_workflow(monkeypatch):
-    from codice_tesi import main
-
-    calls = []
-
-    async def run(**kwargs):
-        calls.append(kwargs)
-
-    monkeypatch.setattr(application, "run_application", run)
-    main.main([])
-    assert calls[0]["context_id"] is None and calls[0]["output_dir"] == Path("output/dimissioni")

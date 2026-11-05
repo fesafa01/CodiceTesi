@@ -158,7 +158,6 @@ def test_failed_or_cancelled_request_span_is_closed_without_content(
                 backend_url="http://fixture",
                 packet=packet_factory("nota", text="PRIVATE_SOURCE"),
                 output_dir=tmp_path,
-                console=False,
                 config=ModelConfig(thinking=False),
             )
         )

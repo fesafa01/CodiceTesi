@@ -63,7 +63,7 @@ class Telemetry:
             OTLPMetricExporter(
                 endpoint=endpoint + "/v1/metrics",
                 timeout=config.export_timeout_seconds,
-                # CLI brevi: il Collector accumula i delta tra processi diversi.
+                # Il Collector accumula i delta tra processi diversi.
                 preferred_temporality={
                     Counter: AggregationTemporality.DELTA,
                     Histogram: AggregationTemporality.DELTA,

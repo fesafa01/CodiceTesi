@@ -294,7 +294,7 @@ def test_model_inactivity_is_reported_separately_from_generic_failure(web_client
     assert result["status"] == "failed"
     assert result["failure_code"] == "model_inactivity_timeout"
     assert "240 secondi" in result["detail"] and "in coda" in result["detail"]
-    assert "CLI" in result["detail"] and "result" not in result
+    assert "generazioni già attive" in result["detail"] and "result" not in result
 
 
 def test_manual_sections_are_saved_with_conflict_detection_and_survive_restart(

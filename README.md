@@ -38,37 +38,25 @@ i servizi con `docker compose up -d backend agent-api spark-archive web`.
 
 Aprire [l'interfaccia locale](http://127.0.0.1:3000) e accedere con utente
 `mimic` e password `APP_MIMIC_TOKEN` dal file `$TESI_PRIVATE_DIR/var/mimic/access.env`.
-Per la CLI, con Tailscale e serving disponibili:
-
-```bash
-umask 077
-set -a
-source "$TESI_PRIVATE_DIR/var/mimic/access.env"
-set +a
-uv run --locked --no-editable python main.py dimissione \
-  --contesto "${APP_MIMIC_CONTEXTS%%,*}" --no-thinking --no-telemetry
-```
-
 Il pairing dei 17 campi, i limiti delle fonti e il comando per confrontare una
 bozza con la relativa lettera sono descritti in [MIMIC e CAMPUS](docs/mimic-campus.md).
 Il [catalogo dei dataset](docs/dataset-mimic.md) include il comando per scaricare ICU.
 
-L'interfaccia web e la CLI usano `qwen3.8:27b` per impostazione predefinita.
+L'interfaccia web usa `qwen3.8:27b` per impostazione predefinita.
 Per usare Gemma, aggiungere o sostituire `LLM_MODEL=gemma4:31b` in `.env`.
 Entrambi usano l'endpoint Ollama del DGX Spark (porta `11434`). Per applicare la
 modifica all'interfaccia web, usare `docker compose up -d --build agent-api`.
-Per una sola prova da CLI, aggiungere `--model gemma4:31b` al comando `dimissione`.
 Per tornare a Qwen, impostare `LLM_MODEL=qwen3.8:27b`. Per usare il serving
-DeepSeek, impostare `LLM_MODEL=deepseek-v4-flash` o usare `--model deepseek-v4-flash`.
+DeepSeek, impostare `LLM_MODEL=deepseek-v4-flash`.
 
-`--thinking` e `--no-thinking` scelgono la modalità; senza flag vale `ModelConfig`
-in `src/codice_tesi/config.py`. Con reasoning attivo il livello predefinito è `low`.
+La casella **Reasoning** controlla la modalità. Quando è attiva, il livello
+predefinito è `low`.
 `max_tokens` comprende reasoning e testo. Prima della lettera, il reasoning
 attivo rinnova il limite di inattività. `LLM_OLLAMA_BASE_URL` configura l'endpoint
 Ollama. `LLM_BASE_URL` e `LLM_API_KEY` configurano il serving DeepSeek.
 `LLM_TIMEOUT` vale per entrambi.
 
-`--dry-run` prepara la richiesta senza inferenza. Gli esiti sono in
+Gli esiti sono in
 `$TESI_PRIVATE_DIR/output/dimissioni-mimic/<contesto>/<esecuzione>/` per MIMIC;
 la sottocartella `registro/` contiene
 un record per tentativo, inclusi errori e interruzioni. La validazione riguarda
@@ -90,8 +78,7 @@ con il livello inviato al server e l'abilitazione dei tool. Ogni cartella contie
   del monitor. I valori mancanti e gli errori di raccolta sono espliciti.
 
 L'archivio si aggiorna a fine tentativo, anche se fallisce o viene interrotto.
-Include le prove CLI con output sotto `$TESI_PRIVATE_DIR/output/`
-e salta le anteprime. Il servizio `spark-archive` ritenta il recupero degli originali
+Il servizio `spark-archive` ritenta il recupero degli originali
 temporaneamente indisponibili. `TEST-SPARK` resta locale e riservata.
 Per MIMIC l'export OTLP è disattivato, quindi i contatori disponibili in questo
 flusso vengono dallo stream del serving e i campioni hardware dal monitor DGX Spark.
@@ -111,11 +98,6 @@ vuoti; se la risposta manca nelle fonti, viene segnalata la lacuna senza dedurre
 I dettagli delle regole sono nei sorgenti del template e del prompt.
 
 ## Interfaccia web locale
-
-Il client `app` è nel profilo Compose `cli`: avviare lo stack ordinario non
-lancia automaticamente una seconda generazione. Per una prova CLI usare
-`docker compose run --rm app ...` oppure attivare esplicitamente il profilo.
-Il limite di una generazione web alla volta non coordina richieste CLI separate.
 
 ```bash
 docker compose up -d --build web
@@ -138,17 +120,14 @@ download, con il testo AI originale disponibile per confronto.
 ## Evidenze e approfondimenti agentici
 
 La generazione non ha una durata massima complessiva predefinita. Solo se serve,
-si può imporla dalla CLI con `--total-timeout SECONDI` o dall'API con
-`timeout_seconds`. La pagina mostra fase e tempo trascorso e consente
+si può impostare `timeout_seconds` dall’API. La pagina mostra fase e tempo trascorso e consente
 **Interrompi**, conservando la risposta parziale. Restano i controlli di
 inattività del modello e della connessione, distinti dalla durata totale.
 
 La UI offre due caselle indipendenti: **Reasoning** (inizialmente spuntata) e
-**Verifiche documentali** (inizialmente non spuntata). Le quattro combinazioni
-sono disponibili anche dalla CLI con `--thinking`/`--no-thinking` e
-`--tools`/`--no-tools`.
+**Verifiche documentali** (inizialmente non spuntata).
 
-`--tools` o la casella **Verifiche documentali** abilita riepiloghi delle osservazioni, sequenze delle
+La casella **Verifiche documentali** abilita riepiloghi delle osservazioni, sequenze delle
 terapie documentate e cronologie, oltre all’ispezione dei passaggi originali.
 Tutte le fonti restano nel contesto iniziale; le elaborazioni usano soltanto lo
 snapshot della degenza, con limiti di richieste, risultati e token. Questa modalità richiede
@@ -183,14 +162,12 @@ i relativi test sono in `tests/observability/`.
 
 ```bash
 docker compose up -d --wait phoenix-db phoenix otel-collector prometheus
-uv run --locked --no-editable python main.py registro --format csv \
-  --destination output/metriche/esecuzioni.csv
 ```
 
 Le interfacce locali sono [Phoenix](http://127.0.0.1:6006) e
 [Prometheus](http://127.0.0.1:9090). Sul Mac configurare `observability/.env`
 da `observability/.env.example` senza sovrascrivere impostazioni esistenti.
-`--no-telemetry` disattiva l'export mantenendo il registro. I contenuti delle fonti e della bozza restano
+Per MIMIC l’export è disattivato e il registro resta attivo. I contenuti delle fonti e della bozza restano
 negli artefatti locali e non sono esportati nelle tracce previste.
 
 - [Osservabilità](observability/README.md): componenti, misure, uso e limiti.

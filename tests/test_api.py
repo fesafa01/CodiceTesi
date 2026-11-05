@@ -1,14 +1,10 @@
 """Verifica del protocollo HTTP e degli errori senza contattare il server reale."""
 
 import os
-import sys
 
-import httpx2 as httpx
 import pytest
-from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from codice_tesi import api, main
 from codice_tesi.config import (
     DEEPSEEK_MODEL,
     GEMMA_MODEL,
@@ -26,38 +22,6 @@ def clean_environment(monkeypatch, tmp_path):
             monkeypatch.delenv(name)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PYDANTIC_AI_NO_BANNER", "1")
-
-
-def mock_client(handler):
-    return AsyncOpenAI(
-        base_url="http://spark.test:8000/v1",
-        api_key="test-key",
-        max_retries=0,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-    )
-
-
-def test_list_models(monkeypatch, capsys):
-    def handler(request):
-        assert request.url.path == "/v1/models"
-        return httpx.Response(
-            200,
-            json={
-                "object": "list",
-                "data": [
-                    {
-                        "id": "deepseek-v4-flash",
-                        "object": "model",
-                        "created": 1,
-                        "owned_by": "local",
-                    }
-                ],
-            },
-        )
-
-    monkeypatch.setattr(api, "create_client", lambda settings: mock_client(handler))
-    main.main(["modelli"])
-    assert capsys.readouterr().out == "deepseek-v4-flash\n"
 
 
 def test_environment_overrides_dotenv(tmp_path, monkeypatch):
@@ -148,17 +112,3 @@ def test_thinking_is_explicit_and_effort_only_applies_when_enabled():
     enabled = ModelConfig(thinking=True).request_settings()
     assert enabled["extra_body"] == {"thinking": {"type": "enabled"}}
     assert enabled["openai_reasoning_effort"] == "low"
-
-
-def test_connection_failure_has_actionable_message(monkeypatch, capsys):
-    def handler(request):
-        raise httpx.ConnectError("Connection refused", request=request)
-
-    monkeypatch.setattr(api, "create_client", lambda settings: mock_client(handler))
-    monkeypatch.setattr(sys, "argv", ["tesi-agent", "modelli"])
-    with pytest.raises(SystemExit) as exc:
-        main.main()
-    assert exc.value.code == 1
-    error = capsys.readouterr().err
-    assert "Tailscale" in error
-    assert "Traceback" not in error

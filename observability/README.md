@@ -39,7 +39,7 @@ al `run_id`. Lo stato della raccolta compare in `spark_monitor`.
 
 ```mermaid
 flowchart LR
-    APP[Applicazione CLI] --> REG[Registro JSON atomico e artefatti locali]
+    APP[API di generazione web] --> REG[Registro JSON atomico e artefatti locali]
     APP -->|OTLP HTTP| COL[OpenTelemetry Collector]
     COL -->|Tracce con coda persistente| PX[Phoenix]
     PX --> PDB[(PostgreSQL dedicato)]
@@ -75,51 +75,30 @@ Dalla cartella `CodiceTesi`:
 
 ```bash
 docker compose up -d --wait phoenix-db phoenix otel-collector prometheus
-docker compose build app
-
-# Backend e campione già inizializzati:
-docker compose run --rm app dimissione --seed 42 --dry-run --no-telemetry \
-  --experiment-file /app/experiments/exploratory.example.json
+docker compose up -d --build --wait web
 ```
 
-La cartella `experiments/` è montata in sola lettura nel container. Creare un JSON
-per la condizione sperimentale e aggiornare `repetition` a ogni ripetizione.
-`--model` cambia l'ID richiesto al server; i parametri e i flag di reasoning del
-modello vanno verificati per ogni famiglia, senza supporre che siano portabili.
-
-Per l'esecuzione Python sul Mac:
-
-```bash
-# Eseguito già durante l'integrazione; non sovrascrivere una configurazione personale.
-cp -n observability/.env.example observability/.env
-uv sync --locked --extra backend --no-editable
-set -a; source var/mimic/access.env; set +a
-uv run --locked --no-editable python main.py dimissione \
-  --seed 42 --dry-run --no-telemetry \
-  --experiment-file experiments/exploratory.example.json
-```
+Avviare le generazioni da CAMPUS dopo aver importato il campione. Il modello
+richiesto si configura in `.env` con `LLM_MODEL`.
 
 Il file `observability/.env` è separato da `.env`, destinato alla connessione LLM.
 Variabili: `TELEMETRY_ENABLED`, `TELEMETRY_ENDPOINT`, `TELEMETRY_PROJECT`,
 `TELEMETRY_EXPORT_TIMEOUT_SECONDS`. Nel container l'endpoint è
 `http://otel-collector:4318`; sul Mac è `http://127.0.0.1:4318`.
-`--no-telemetry` disabilita gli export; il registro locale resta attivo.
+Per MIMIC gli export sono disabilitati e il registro locale resta attivo.
 
 Le generazioni continuano a richiedere backend, dataset e Spark raggiungibili.
-L'elenco dei modelli è verificabile senza inferenza con `python main.py modelli`.
-Se i servizi sono già avviati, `docker compose run --rm --no-deps app ...` permette
-anche di eseguire il client quando lo stack di osservabilità non è disponibile.
 Gli errori di esportazione non devono trasformare una generazione riuscita in un
 fallimento. Un Collector non raggiungibile può comunque perdere dati prima della
 ricezione: il registro rimane il riferimento e non viene ricreato dalla dashboard.
 
 ## Registro e riproducibilità
 
-Ogni invocazione del workflow, compresi `--dry-run`, fallimenti di lettura o
-preparazione, errori del modello e cancellazioni, crea:
+Ogni tentativo di generazione web, inclusi gli errori e le cancellazioni, crea un
+record locale:
 
 ```
-output/dimissioni/registro/<run_id>.json
+output/dimissioni-mimic/registro/<run_id>.json
 ```
 
 Quando il pacchetto è disponibile, il record rimanda anche alla cartella originale
@@ -137,9 +116,8 @@ Il record contiene:
 - tempi delle fasi e misure dello stream, conteggi di token disponibili e qualità dei contatori;
 - identificativi della trace, percorso degli artefatti e risultato del flush SDK.
 
-Checkpoint, tokenizer, quantizzazione, runtime, hardware di inferenza, cache,
-concorrenza e split del dataset sono **dichiarati dall'operatore** nel JSON
-esperimento. Un campo non verificato va lasciato `null`/`unknown`. Il sistema non
+I campi del registro relativi a checkpoint, quantizzazione, runtime e altre
+condizioni sperimentali possono essere `null` o `unknown` se non attestati. Il sistema non
 attribuisce allo Spark le caratteristiche del Mac o del container client.
 `source_sha256` identifica i sorgenti e i template installati, non un commit Git.
 Nell’installazione il manifest segue i file dichiarati nel pacchetto distribuito,
@@ -160,16 +138,8 @@ in corso. Dopo SIGKILL o perdita di alimentazione un record può restare
 `preparing`/`running`; non deve essere interpretato come esecuzione completata.
 Le durate usano un orologio monotono, i timestamp UTC servono alla correlazione.
 
-```bash
-uv run --locked --no-editable python main.py registro --format csv \
-  --destination output/metriche/esecuzioni.csv
-uv run --locked --no-editable python main.py registro --format jsonl \
-  --destination output/metriche/esecuzioni.jsonl
-
-# Alternativa dal container, con output persistente sul Mac:
-docker compose run --rm --no-deps app registro --format csv \
-  --destination output/metriche/esecuzioni.csv
-```
+`export_registry` nel modulo Python `codice_tesi.observability.execution` consente
+l’esportazione offline in CSV o JSONL.
 
 L'export legge soltanto il nuovo registro; non inventa metriche per le bozze
 storiche. JSONL conserva oggetti e `null`; CSV appiattisce i nomi con punti e rende
@@ -291,7 +261,7 @@ Collector, log Docker e serving richiedono regole e verifiche separate.
 ## Prometheus e comandi brevi
 
 Il client esporta metriche con temporalità **delta**; il processore
-`deltatocumulative` del Collector accumula i valori tra processi CLI successivi.
+`deltatocumulative` del Collector accumula i valori tra riavvii del processo di generazione.
 Senza questa conversione un istogramma cumulativo nuovo per ogni comando potrebbe
 sostituire quello precedente. Le etichette contengono progetto, modello, modalità thinking,
 stato e modalità dry-run; non contengono run ID, trace ID o identificativi clinici.

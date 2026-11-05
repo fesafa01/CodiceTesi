@@ -5,7 +5,7 @@ I tool opzionali elaborano lo stesso snapshot autorizzato, con
 budget complessivi e tracciamento dei tentativi.
 
 Per editor, streaming e uso dell'interfaccia vedere [web/README.md](../web/README.md).
-Per avvio, CLI e configurazione vedere il [README principale](../README.md).
+Per avvio e configurazione vedere il [README principale](../README.md).
 I valori predefiniti sono definiti in `src/codice_tesi/config.py` e salvati nel
 registro di ogni esecuzione, senza duplicarli in questa guida.
 
@@ -221,8 +221,6 @@ streaming e salvataggio. Non sostituiscono il collaudo del serving reale.
 | `model_protocol_error` | Risposta del modello non utilizzabile |
 | `model_usage_limit` | Esaurito un budget di richieste, tool, contesto o token |
 
-Il limite di un lavoro web per processo non coordina le richieste avviate da CLI.
-Il servizio `app` appartiene al profilo Compose `cli` e parte solo su richiesta.
 Dopo un'interruzione il rilascio effettivo delle risorse sullo Spark va verificato
 sul serving; la chiusura client non lo attesta.
 

@@ -146,7 +146,6 @@ def test_spark_run_saves_hardware_metrics_after_generation(
             backend_url="http://test",
             output_dir=tmp_path,
             packet=packet,
-            console=False,
             settings=Settings(base_url=SPARK_LLM_URL, _env_file=None),
             telemetry_config=TelemetryConfig(enabled=False),
         )
