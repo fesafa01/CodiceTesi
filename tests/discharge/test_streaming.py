@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 from pydantic_ai.exceptions import ModelAPIError
 
 from codice_tesi import api, application
-from codice_tesi.config import ModelConfig, Settings
+from codice_tesi.config import DEEPSEEK_MODEL, GEMMA_MODEL, QWEN_MODEL, ModelConfig, Settings
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.generator import LLMDraftGenerator
@@ -29,8 +29,9 @@ def sse(text, finish=None):
 
 
 @pytest.mark.parametrize("thinking", [False, True])
+@pytest.mark.parametrize("model", [DEEPSEEK_MODEL, QWEN_MODEL, GEMMA_MODEL])
 def test_single_http_call_streams_before_completion_and_flushes_same_file(
-    packet_factory, tmp_path, monkeypatch, capsys, thinking, letter_factory, response_factory
+    packet_factory, tmp_path, monkeypatch, capsys, thinking, model, letter_factory, response_factory
 ):
     packet = packet_factory("triage", "anamnesi")
     calls = []
@@ -61,12 +62,15 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
             assert len(calls) == 1 and request.url.path == "/v1/chat/completions"
             assert body["stream"] is True and not body.get("tools")
             assert body.get("tool_choice") in (None, "none")
-            assert body["top_k"] == 20 and body["max_tokens"] == 8192
-            assert body["thinking"] == {"type": "enabled" if thinking else "disabled"}
-            if thinking:
-                assert body["reasoning_effort"] == "low"
+            assert body["model"] == model and body["max_tokens"] == 8192
+            if model in {QWEN_MODEL, GEMMA_MODEL}:
+                assert body["response_format"] == {"type": "json_object"}
+                assert body["reasoning_effort"] == ("low" if thinking else "none")
             else:
-                assert "reasoning_effort" not in body
+                assert "response_format" not in body
+                assert body["top_k"] == 20
+                assert body["thinking"] == {"type": "enabled" if thinking else "disabled"}
+                assert body.get("reasoning_effort") == ("low" if thinking else None)
             assert [m["role"] for m in body["messages"]] == ["system", "user"]
             for i, field in enumerate(packet.template.sections, 1):
                 assert f"{i}. {field.title}\n" in body["messages"][0]["content"]
@@ -89,7 +93,7 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
             application.run_application(
                 backend_url="http://test",
                 output_dir=tmp_path,
-                config=ModelConfig(top_k=20, max_tokens=8192, thinking=thinking),
+                config=ModelConfig(model=model, top_k=20, max_tokens=8192, thinking=thinking),
             )
         )
         try:

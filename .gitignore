@@ -212,6 +212,14 @@ tempCodeRunnerFile.py
 /var/
 /output/dimissioni/
 /output/
+/TEST-SPARK/
+/.codex/config.toml
+/data/
+hosp/
+icu/
+mimic-iv*/
+physionet.org/
+*.gz
 /verifiche/
 /observability/.env
 

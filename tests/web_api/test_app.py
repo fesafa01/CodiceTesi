@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from codice_tesi import application
 from codice_tesi.access import LocalIdentity
+from codice_tesi.config import QWEN_MODEL
 from codice_tesi.web_api.app import create_app
 
 
@@ -23,6 +24,7 @@ def web_client(tmp_path, packet_factory, monkeypatch):
 
     monkeypatch.setattr("codice_tesi.web_api.app.PacketClient.fetch", fetch)
     monkeypatch.setenv("TELEMETRY_ENABLED", "false")
+    monkeypatch.setenv("LLM_MODEL", QWEN_MODEL)
     app = create_app(output_dir=tmp_path, backend_url="http://test")
     app.state.identities = (
         LocalIdentity("test", "demo-test", frozenset({packet.context.id})),
@@ -112,6 +114,7 @@ def test_generation_uses_preloaded_packet_and_publishes_validated_result(
     assert result["result"]["catalog"]["sources"][0]["text"] == packet.sources[0].text
     assert len(calls) == len(streams) == 1
     expected = options or {"thinking": True, "tools_enabled": False}
+    assert configs[0].model == QWEN_MODEL
     assert configs[0].thinking is expected["thinking"]
     assert configs[0].tools_enabled is expected["tools_enabled"]
     assert configs[0].total_timeout is None
@@ -120,8 +123,9 @@ def test_generation_uses_preloaded_packet_and_publishes_validated_result(
     assert "Testo di fixture" not in capsys.readouterr().out
 
 
-def test_invalid_citations_do_not_become_a_letter(
-    web_client, monkeypatch, letter_factory, response_factory
+@pytest.mark.parametrize("invalid_json", [False, True])
+def test_invalid_draft_does_not_become_a_letter(
+    web_client, monkeypatch, letter_factory, response_factory, invalid_json
 ):
     client, _, _ = web_client
 
@@ -133,13 +137,20 @@ def test_invalid_citations_do_not_become_a_letter(
             pass
 
         async def stream(self, request):
-            yield response_factory(letter_factory()).replace("evidenza-0001", "inventata")
+            response = response_factory(letter_factory())
+            if invalid_json:
+                yield response.rstrip() + "}"
+            else:
+                yield response.replace("evidenza-0001", "inventata")
 
     monkeypatch.setattr(application, "LLMDraftGenerator", Generator)
     path = prepare(client)
     client.post(path + "/genera")
     result = wait_result(client, path)
     assert result["status"] == "failed" and "result" not in result
+    assert result["failure_code"] == (
+        "invalid_draft_json" if invalid_json else "invalid_draft_contract"
+    )
     assert client.get(path + "/fonti/source-0").status_code == 200
     assert client.post(path + "/genera").json()["status"] == "failed"
 

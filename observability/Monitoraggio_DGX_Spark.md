@@ -1,5 +1,50 @@
 # Raccolta delle misure sul DGX Spark
 
+## Raccolta automatica a fine prova
+
+Per le generazioni avviate sul DGX Spark da CLI o da CAMPUS, il workflow salva
+automaticamente `spark/RUN_ID.json` nella stessa cartella di output che contiene
+`registro/RUN_ID.json`. Per esempio, in CAMPUS con MIMIC il file è in
+`output/dimissioni-mimic/spark/`. Nel registro, `spark_monitor` indica il percorso
+relativo all'output, lo stato di raccolta e quanti punti ricadono nella prova
+quando lo storico è disponibile. Il file include anche le risposte del monitor
+per la finestra richiesta, di almeno 15 minuti e più ampia per le prove lunghe.
+
+La raccolta avviene dopo la chiusura della prova e include i tentativi di
+inferenza falliti o interrotti. Le anteprime `--dry-run` e le prove su altri
+host saltano la raccolta. Un endpoint in errore è indicato in `errors`; i dati
+ricevuti dall'altro endpoint restano disponibili. La richiesta invia solo la
+finestra temporale al monitor. Il `run_id` e l'associazione restano locali.
+
+## Raccolta manuale via API
+
+Dalla radice `CodiceTesi`, con Tailscale connesso:
+
+```bash
+python3 observability/spark_usage.py
+python3 observability/spark_usage.py --run output/dimissioni/registro/RUN_ID.json
+```
+
+Nel secondo comando, sostituire `RUN_ID` con l'identificativo di una prova
+conclusa e lanciare il comando appena termina. Lo script interroga `/history`
+e `/energy` su `http://spark-413e.tail9c981a.ts.net:9108` e salva entrambe le
+risposte in un JSON con timestamp UTC in `output/metriche/spark/`. Con `--run`
+aggiunge `run.run_id` e `run.series`, che contiene i punti con timestamp compreso
+fra `started_at` ed `ended_at`. Lo script usa la libreria standard di Python.
+
+La finestra predefinita è di 24 ore per la raccolta generale e 15 minuti per
+la singola prova. Per una prova più lunga o conclusa da più tempo, usare
+`--hours` con un valore che risalga fino a prima dell'inizio, per esempio
+`--hours 0.5`. Controllare `history.step` e gli orari dei punti restituiti.
+Nella verifica sullo Spark, il passo era di 10 secondi su 15 minuti e di
+172 secondi su 24 ore. Una serie vuota indica assenza di punti nell'intervallo.
+
+`energy.wh_total` riguarda l'intera finestra mobile di `/energy`. Usare
+`energy.power_source_samples` per verificare quali sorgenti di potenza hanno
+contribuito. Nelle risposte verificate i campioni provenivano dalla GPU.
+
+## Raccolta manuale
+
 Procedura per la durata delle prove, con comandi da eseguire a mano. Si usano
 `nvidia-smi`, `top` e il server di file incluso in Python 3. La GPU e la RAM
 vengono campionate ogni 5 secondi sullo Spark, anche quando il Mac è scollegato.

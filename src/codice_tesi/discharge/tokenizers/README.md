@@ -1,4 +1,4 @@
-# Tokenizer DeepSeek V4
+# Tokenizer locali
 
 `deepseek_v4.json` è il file `tokenizer.json` ufficiale, senza modifiche:
 
@@ -11,6 +11,15 @@ Il template per i due messaggi testuali e il prefisso di reasoning massimo seguo
 `encoding/encoding_dsv4.py` della medesima revisione. Il flusso non usa tool,
 immagini o cronologia. Gli ID Flash e PRO sono alias compatibili del server DS4;
 il tokenizer locale non verifica quale GGUF sia caricato sul server.
+
+`qwen3_8.json` è il `tokenizer.json` ufficiale di Qwen3.8-27B, senza modifiche.
+La stima usa il framing ChatML per due messaggi testuali e lascia al margine
+applicativo le direttive aggiuntive del template Ollama.
+
+- Repository: https://huggingface.co/Qwen/Qwen3.8-27B
+- Revisione: `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`
+- SHA-256: `0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3`
+- Licenza: Apache 2.0, conservata in `LICENSE.qwen`.
 
 I file sono inclusi nella distribuzione Python e nelle immagini Docker. Non vengono
 scaricati tokenizer o pesi durante la preparazione delle richieste. Dopo un cambio

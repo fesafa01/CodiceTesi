@@ -60,7 +60,6 @@ def main(argv: list[str] | None = None) -> None:
     discharge.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("output/dimissioni"),
         help="Directory base; salva in <directory>/<contesto>/<esecuzione>/.",
     )
     discharge.add_argument(
@@ -76,7 +75,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     commands.add_parser("modelli", help="Elenca i modelli del server LLM.")
     registry = commands.add_parser("registro", help="Esporta il registro in CSV o JSONL.")
-    registry.add_argument("--output-dir", type=Path, default=Path("output/dimissioni"))
+    registry.add_argument("--output-dir", type=Path)
     registry.add_argument("--format", choices=("csv", "jsonl"), default="csv")
     registry.add_argument("--destination", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -90,13 +89,15 @@ def main(argv: list[str] | None = None) -> None:
     from pydantic_ai.exceptions import AgentRunError, ModelAPIError, UserError
 
     from codice_tesi import api
-    from codice_tesi.config import ModelConfig, Settings
+    from codice_tesi.config import ModelConfig, Settings, default_output_dir
 
     try:
         if args.command == "registro":
             from codice_tesi.observability.execution import export_registry
 
-            count = export_registry(args.output_dir, args.destination, format=args.format)
+            count = export_registry(
+                args.output_dir or default_output_dir(), args.destination, format=args.format
+            )
             print(f"Esportate {count} esecuzioni: {args.destination}")
             return
         if args.command == "dimissione":
@@ -105,13 +106,13 @@ def main(argv: list[str] | None = None) -> None:
             from codice_tesi.observability.execution import ExperimentConfig
             from codice_tesi.observability.telemetry import TelemetryConfig
 
+            settings = Settings()
             config = ModelConfig()
+            config.model = args.model if args.model is not None else settings.model
             config.tools_enabled = args.tools
             config.total_timeout = args.total_timeout
             if args.thinking is not None:
                 config.thinking = args.thinking
-            if args.model is not None:
-                config.model = args.model
             experiment = (
                 ExperimentConfig.model_validate(json.loads(args.experiment_file.read_text()))
                 if args.experiment_file
@@ -123,18 +124,20 @@ def main(argv: list[str] | None = None) -> None:
             asyncio.run(
                 run_application(
                     backend_url=args.backend_url,
-                    output_dir=args.output_dir,
+                    output_dir=args.output_dir or default_output_dir(),
                     seed=args.seed,
                     context_id=args.contesto,
                     dry_run=args.dry_run,
                     config=config,
+                    settings=settings.for_model(config.model),
                     context_config=ContextConfig(window_tokens=args.context_window),
                     experiment=experiment,
                     telemetry_config=telemetry_config,
                 )
             )
             return
-        for model in asyncio.run(api.list_models(Settings())):
+        settings = Settings()
+        for model in asyncio.run(api.list_models(settings.for_model(settings.model))):
             print(model)
     except ValidationError as exc:
         fields = ", ".join(

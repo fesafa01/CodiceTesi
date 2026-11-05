@@ -2,11 +2,21 @@
 
 import hashlib
 import json
+from urllib.error import URLError
 
 import pytest
 
 from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
 from codice_tesi.discharge.template import MISSING_VALUE, load_template
+from codice_tesi.observability import spark
+
+
+@pytest.fixture(autouse=True)
+def block_live_spark_monitor(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise URLError("Monitor disconnesso nel test")
+
+    monkeypatch.setattr(spark, "urlopen", unavailable)
 
 
 @pytest.fixture

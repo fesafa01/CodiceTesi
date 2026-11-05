@@ -13,7 +13,7 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIStreamedResponse
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from codice_tesi.config import ModelConfig, Settings
+from codice_tesi.config import OLLAMA_MODELS, ModelConfig, Settings
 from codice_tesi.observability.stream_metrics import RunStreamObservation, active_observation
 
 
@@ -51,11 +51,13 @@ class MeasuredChatModel(OpenAIChatModel):
                 if type(settings.get(field)) in (int, float):
                     metadata[field] = settings[field]
             effort = settings.get("openai_reasoning_effort")
-            if effort in {"none", "off", "minimal", "low", "medium", "high", "max"}:
+            if effort in {"none", "off", "minimal", "low", "medium", "high", "max", "xhigh"}:
                 metadata["reasoning_effort"] = effort
             thinking = (settings.get("extra_body") or {}).get("thinking", {}).get("type")
             if thinking in {"enabled", "disabled"}:
                 metadata["thinking"] = thinking == "enabled"
+            elif self.model_name in OLLAMA_MODELS:
+                metadata["thinking"] = effort != "none"
             observation = observation.begin(metadata)
             token = active_observation.set(observation)
         elif observation is not None:

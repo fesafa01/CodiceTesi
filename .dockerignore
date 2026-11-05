@@ -1,4 +1,5 @@
 .git
+.codex
 .venv
 .cache
 .pytest_cache
@@ -13,6 +14,12 @@ build
 data
 var
 output
+TEST-SPARK
+**/hosp
+**/icu
+**/mimic-iv*
+**/physionet.org
+**/*.gz
 verifiche
 
 # Documentazione e strumenti offline non necessari alle immagini runtime.

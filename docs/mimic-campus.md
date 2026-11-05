@@ -98,7 +98,7 @@ le estensioni da scaricare e il comando ICU.
   e dieci hanno misure ICU. Nessun ordine `Discharge Med` soddisfa tutti
   i criteri. Le 20 richieste sono state validate localmente, con
   11.881–46.863 token stimati di input. L'indice privato per la prova
-  in CAMPUS è in `var/mimic/casi-test.md`.
+  in CAMPUS è in `$TESI_PRIVATE_DIR/var/mimic/casi-test.md`.
 - Per il pilota usare la generazione ordinaria. Le fonti testuali MIMIC sono
   leggibili per passaggio. Gli aggregatori agentici dei fatti strutturati
   sono stati sviluppati sul formato dei record Synthea.
@@ -149,7 +149,7 @@ presenza di informazioni corrispondenti nel testo narrativo.
 
 ## Guida di stesura MIMIC
 
-Per il dataset MIMIC, il prompt `campus-mimic-v3` riporta l'origine di ogni
+Per il dataset MIMIC, il prompt `campus-mimic-v4` riporta l'origine di ogni
 fonte e usa la guida MIMIC con le stesse 17 sezioni CAMPUS. I codici ICD
 retrospettivi vanno nei campi codificati con l'indicazione «codifica
 amministrativa del ricovero». L'epicrisi può essere breve quanto consentono
@@ -166,7 +166,7 @@ citazioni. L'aderenza del modello alle istruzioni richiede una prova di inferenz
 ```bash
 docker compose run --rm backend-admin profile-mimic
 docker compose run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD/output/dimissioni-mimic:/confronti" \
+  -v "${TESI_PRIVATE_DIR:-$HOME/Desktop/codice-tesi-private}/output/dimissioni-mimic:/confronti" \
   backend-admin compare-mimic \
   /confronti/<ricovero>/<esecuzione>/bozza_strutturata.json \
   /confronti/confronto-pilota.md

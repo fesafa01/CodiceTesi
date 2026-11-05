@@ -1,4 +1,4 @@
-"""Conteggio locale DeepSeek V4 per una richiesta testuale system + user, senza tool."""
+"""Conteggio locale per una richiesta testuale system + user, senza tool."""
 
 import json
 from dataclasses import dataclass
@@ -7,10 +7,11 @@ from pathlib import Path
 
 from tokenizers import Tokenizer
 
-from codice_tesi.config import ModelConfig
+from codice_tesi.config import QWEN_MODEL, ModelConfig
 
 TOKENIZER_REVISION = "deepseek-ai/DeepSeek-V4-Flash@60d8d70770c6776ff598c94bb586a859a38244f1"
 DEEPSEEK_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+QWEN_TOKENIZER_REVISION = "Qwen/Qwen3.8-27B@1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
 # Prefisso del template ufficiale encoding_dsv4.py, distribuito sotto licenza MIT.
 MAX_EFFORT_PREFIX = (
     "Reasoning Effort: Absolute maximum with no shortcuts permitted.\n"
@@ -30,16 +31,28 @@ class InputTokenEstimate:
     tokenizer_revision: str | None = None
 
 
-@lru_cache(maxsize=1)
-def _deepseek_tokenizer() -> Tokenizer:
+@lru_cache(maxsize=2)
+def _load_tokenizer(filename: str) -> Tokenizer:
     # Solo file incluso nel pacchetto: nessun download o invio di testo a servizi esterni.
-    path = Path(__file__).with_name("tokenizers") / "deepseek_v4.json"
+    path = Path(__file__).with_name("tokenizers") / filename
     return Tokenizer.from_file(str(path))
 
 
 def estimate_input_tokens(
     instructions: str, prompt: str, config: ModelConfig
 ) -> InputTokenEstimate:
+    if config.model == QWEN_MODEL:
+        tokenizer = _load_tokenizer("qwen3_8.json")
+        rendered = (
+            f"<|im_start|>system\n{instructions}<|im_end|>\n"
+            f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n<think>\n"
+        )
+        # Il margine di ContextConfig copre direttive e framing del template Ollama.
+        count = len(tokenizer.encode(rendered, add_special_tokens=False).ids)
+        return InputTokenEstimate(
+            count, "qwen3_8_local_chatml_estimate_v1", QWEN_TOKENIZER_REVISION
+        )
+
     if config.model not in DEEPSEEK_MODELS:
         # Un tokenizer diverso non deve essere presentato come quello del modello richiesto.
         messages = [
@@ -62,7 +75,7 @@ def estimate_input_tokens(
         + "<｜Assistant｜>"
         + ("<think>" if thinking else "</think>")
     )
-    count = len(_deepseek_tokenizer().encode(rendered, add_special_tokens=False).ids)
+    count = len(_load_tokenizer("deepseek_v4.json").encode(rendered, add_special_tokens=False).ids)
     return InputTokenEstimate(count, "deepseek_v4_local_chat_template_v1", TOKENIZER_REVISION)
 
 
@@ -72,9 +85,12 @@ def input_token_breakdown(instructions, prompt, source_texts, config, estimate) 
     Gli schemi dei tool non fanno parte di questa stima testuale. Non si attribuisce
     il tokenizer DeepSeek a modelli diversi e non si espongono i testi alle tracce.
     """
-    if config.model not in DEEPSEEK_MODELS:
+    if config.model == QWEN_MODEL:
+        tokenizer = _load_tokenizer("qwen3_8.json")
+    elif config.model in DEEPSEEK_MODELS:
+        tokenizer = _load_tokenizer("deepseek_v4.json")
+    else:
         return {}
-    tokenizer = _deepseek_tokenizer()
 
     def count(text):
         return len(tokenizer.encode(text, add_special_tokens=False).ids)

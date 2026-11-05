@@ -24,6 +24,10 @@ from codice_tesi.discharge.provenance import (
 from codice_tesi.discharge.validation import validate_draft
 
 
+class DraftContractError(ValueError):
+    """La bozza decodificata non supera i controlli tecnici."""
+
+
 class RunArtifacts:
     def __init__(
         self,
@@ -135,9 +139,12 @@ class RunArtifacts:
                     temporary = path.with_suffix(path.suffix + ".tmp")
                     temporary.write_text(content, encoding="utf-8")
                     temporary.replace(path)
-            except ValueError:
+            except json.JSONDecodeError:
                 self.report["tracciabilita"]["technical"] = "failed"
                 raise
+            except ValueError as exc:
+                self.report["tracciabilita"]["technical"] = "failed"
+                raise DraftContractError(str(exc)) from exc
             self.report["tracciabilita"]["technical"] = "passed"
 
     def start(self) -> None:

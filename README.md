@@ -9,19 +9,22 @@ modalità opzionale consente letture documentali nel perimetro della degenza.
 
 ## Avvio MIMIC-IV
 
-Con Docker e i dataset già presenti nella cartella superiore, dalla radice
-del repository:
+Con Docker, dalla radice del repository. I dataset sono sotto `datasets/`
+nell'archivio privato, fuori dal workspace. `TESI_PRIVATE_DIR` è facoltativa se
+si usa il percorso predefinito.
 
 ```bash
-install -d -m 700 var/mimic output/dimissioni-mimic
+export TESI_PRIVATE_DIR="${TESI_PRIVATE_DIR:-$HOME/Desktop/codice-tesi-private}"
+install -d -m 700 "$TESI_PRIVATE_DIR" "$TESI_PRIVATE_DIR/var/mimic" \
+  "$TESI_PRIVATE_DIR/output/dimissioni-mimic" "$TESI_PRIVATE_DIR/TEST-SPARK"
 docker compose build backend-admin
 docker compose up -d --wait db
 docker compose run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD/../hosp:/mimic/hosp:ro" \
-  -v "$PWD/../mimic-iv-note-deidentified-free-text-clinical-notes-2.2/note:/mimic/note:ro" \
-  -v "$PWD/../mimic-iv-ed-2.2/ed:/mimic/ed:ro" \
-  -v "$PWD/../icu:/mimic/icu:ro" \
-  -v "$PWD/var/mimic:/mimic-private" \
+  -v "$TESI_PRIVATE_DIR/datasets/hosp:/mimic/hosp:ro" \
+  -v "$TESI_PRIVATE_DIR/datasets/mimic-iv-note-deidentified-free-text-clinical-notes-2.2/note:/mimic/note:ro" \
+  -v "$TESI_PRIVATE_DIR/datasets/mimic-iv-ed-2.2/ed:/mimic/ed:ro" \
+  -v "$TESI_PRIVATE_DIR/datasets/icu:/mimic/icu:ro" \
+  -v "$TESI_PRIVATE_DIR/var/mimic:/mimic-private" \
   backend-admin import-mimic /mimic/hosp /mimic/note \
     --ed /mimic/ed --icu /mimic/icu --limit 20 --seed 42 \
     --access-file /mimic-private/access.env
@@ -31,37 +34,67 @@ docker compose up -d --build --wait backend agent-api web
 Una volta importato il campione, basta l'ultimo comando per avviare lo stack.
 La selezione legge i CSV compressi in streaming. `--replace` sostituisce
 soltanto il campione MIMIC. Quando si riscrive il file di accesso, riavviare
-i servizi con `docker compose up -d backend agent-api web`.
+i servizi con `docker compose up -d backend agent-api spark-archive web`.
 
 Aprire [l'interfaccia locale](http://127.0.0.1:3000) e accedere con utente
-`mimic` e password `APP_MIMIC_TOKEN` dal file privato `var/mimic/access.env`.
+`mimic` e password `APP_MIMIC_TOKEN` dal file `$TESI_PRIVATE_DIR/var/mimic/access.env`.
 Per la CLI, con Tailscale e serving disponibili:
 
 ```bash
 umask 077
 set -a
-source var/mimic/access.env
+source "$TESI_PRIVATE_DIR/var/mimic/access.env"
 set +a
 uv run --locked --no-editable python main.py dimissione \
-  --contesto "${APP_MIMIC_CONTEXTS%%,*}" --no-thinking --no-telemetry \
-  --output-dir output/dimissioni-mimic
+  --contesto "${APP_MIMIC_CONTEXTS%%,*}" --no-thinking --no-telemetry
 ```
 
 Il pairing dei 17 campi, i limiti delle fonti e il comando per confrontare una
 bozza con la relativa lettera sono descritti in [MIMIC e CAMPUS](docs/mimic-campus.md).
 Il [catalogo dei dataset](docs/dataset-mimic.md) include il comando per scaricare ICU.
 
+L'interfaccia web e la CLI usano `qwen3.8:27b` per impostazione predefinita.
+Per usare Gemma, aggiungere o sostituire `LLM_MODEL=gemma4:31b` in `.env`.
+Entrambi usano l'endpoint Ollama del DGX Spark (porta `11434`). Per applicare la
+modifica all'interfaccia web, usare `docker compose up -d --build agent-api`.
+Per una sola prova da CLI, aggiungere `--model gemma4:31b` al comando `dimissione`.
+Per tornare a Qwen, impostare `LLM_MODEL=qwen3.8:27b`. Per usare il serving
+DeepSeek, impostare `LLM_MODEL=deepseek-v4-flash` o usare `--model deepseek-v4-flash`.
+
 `--thinking` e `--no-thinking` scelgono la modalità; senza flag vale `ModelConfig`
-in `src/codice_tesi/config.py`. `max_tokens` comprende reasoning e testo; prima
-della lettera, il reasoning attivo rinnova il limite di inattività. Connessione:
-`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_TIMEOUT`. `--model` cambia l'ID richiesto:
-parametri e flag devono essere verificati per ciascun modello/runtime.
+in `src/codice_tesi/config.py`. Con reasoning attivo il livello predefinito è `low`.
+`max_tokens` comprende reasoning e testo. Prima della lettera, il reasoning
+attivo rinnova il limite di inattività. `LLM_OLLAMA_BASE_URL` configura l'endpoint
+Ollama. `LLM_BASE_URL` e `LLM_API_KEY` configurano il serving DeepSeek.
+`LLM_TIMEOUT` vale per entrambi.
 
 `--dry-run` prepara la richiesta senza inferenza. Gli esiti sono in
-`output/dimissioni/<contesto>/<esecuzione>/`; `output/dimissioni/registro/` contiene
+`$TESI_PRIVATE_DIR/output/dimissioni-mimic/<contesto>/<esecuzione>/` per MIMIC;
+la sottocartella `registro/` contiene
 un record per tentativo, inclusi errori e interruzioni. La validazione riguarda
 schema, riferimenti delle citazioni, forma e campi istologici; il sostegno clinico
 delle affermazioni resta da valutare.
+
+### Archivio delle prove MIMIC
+
+Lo stack web archivia i nuovi tentativi MIMIC in `$TESI_PRIVATE_DIR/TEST-SPARK/TEST-CASO-MIMIC-1/`,
+`TEST-CASO-MIMIC-2/` e così via. Il numero identifica il tentativo, mentre
+`scheda.json` riporta il ricovero, il modello richiesto, lo stato, il reasoning
+con il livello inviato al server e l'abilitazione dei tool. Ogni cartella contiene:
+
+- `bozza.txt` dopo la validazione, oppure `risposta.parziale.json` se resta testo grezzo.
+- `lettera_ufficiale.txt` con l'originale abbinato alla versione del ricovero.
+  La scheda registra l'identificativo della nota o lo stato del recupero.
+- `metriche.json` con contatori dei token e tempi dello stream dal registro,
+  campioni dello Spark nell'intervallo della prova ed energia per la finestra
+  del monitor. I valori mancanti e gli errori di raccolta sono espliciti.
+
+L'archivio si aggiorna a fine tentativo, anche se fallisce o viene interrotto.
+Include le prove CLI con output sotto `$TESI_PRIVATE_DIR/output/`
+e salta le anteprime. Il servizio `spark-archive` ritenta il recupero degli originali
+temporaneamente indisponibili. `TEST-SPARK` resta locale e riservata.
+Per MIMIC l'export OTLP è disattivato, quindi i contatori disponibili in questo
+flusso vengono dallo stream del serving e i campioni hardware dal monitor DGX Spark.
 
 La generazione restituisce le 17 sezioni in JSON con le fonti citate. Il codice
 produce `bozza.txt`, `bozza_strutturata.json` ed `evidenze.md`, dove ogni sezione è
@@ -134,7 +167,8 @@ risultati 1.0. Uso, configurazione, verifiche e limiti nelle
 
 ## Accesso locale
 
-Le API cliniche richiedono il Bearer token privato del file `var/mimic/access.env`.
+Le API cliniche richiedono il Bearer token privato del file
+`$TESI_PRIVATE_DIR/var/mimic/access.env`.
 Le richieste con credenziali assenti o invalide ricevono **401**. Una richiesta per
 un ricovero fuori assegnazione riceve **403**, anche nella selezione casuale.
 Gli healthcheck sono pubblici sul servizio locale.

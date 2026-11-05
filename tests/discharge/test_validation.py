@@ -90,5 +90,5 @@ def test_invalid_histology_preserves_partial_and_fails_application_without_retry
     assert partial.read_text() == text
     assert not (partial.parent / "bozza.txt").exists()
     report = json.loads((partial.parent / "esito.json").read_text())
-    assert report["stato"] == "fallito" and report["errore_tipo"] == "ValueError"
+    assert report["stato"] == "fallito" and report["errore_tipo"] == "DraftContractError"
     assert report["richieste_llm_avviate"] == 1 and len(calls) == 1

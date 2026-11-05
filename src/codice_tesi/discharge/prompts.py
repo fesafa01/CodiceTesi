@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from codice_tesi.discharge.facts import FactInventory
 from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
 from codice_tesi.discharge.provenance import EvidenceCatalog, build_catalog
-from codice_tesi.discharge.template import LetterTemplate
+from codice_tesi.discharge.template import MISSING_VALUE, LetterTemplate
 
 PROMPT_VERSION = "campus-stesura-v21-prefisso-stabile"
-MIMIC_PROMPT_VERSION = "campus-mimic-v3"
+MIMIC_PROMPT_VERSION = "campus-mimic-v4"
 
 INSTRUCTIONS = """# Priorità operative
 Applica queste priorità nell'ordine:
@@ -430,6 +430,12 @@ def build_prompt(
                 ),
                 "Verifica i passaggi indicati. Non completare attributi mancanti con ipotesi.",
             ]
+        )
+    if packet.context.dataset == MIMIC_DATASET:
+        lines.append(
+            "Se le fonti non riportano prescrizioni finali esplicite, usa in "
+            f'terapia_dimissione esattamente text="{MISSING_VALUE}" e sources=[]. '
+            "Non aggiungere spiegazioni sulla terapia in degenza o su ciò che manca."
         )
     lines.append(
         "Restituisci ora soltanto il JSON delle 17 sezioni con le citazioni, applicando la guida "

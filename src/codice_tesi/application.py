@@ -10,7 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from codice_tesi import api
-from codice_tesi.config import SPARK_LLM_URL, ModelConfig, Settings
+from codice_tesi.config import SPARK_LLM_URL, SPARK_OLLAMA_URL, ModelConfig, Settings
 from codice_tesi.discharge.artifacts import RunArtifacts
 from codice_tesi.discharge.client import PacketClient
 from codice_tesi.discharge.config import ContextConfig
@@ -21,6 +21,7 @@ from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
 from codice_tesi.discharge.provenance import EvidenceCatalog
 from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfig
 from codice_tesi.observability.model_spans import agent_attributes, prompt_attributes
+from codice_tesi.observability.spark import SPARK_HOSTS, capture_run
 from codice_tesi.observability.telemetry import Telemetry, TelemetryConfig
 
 
@@ -81,6 +82,7 @@ async def run_application(
             )
 
     artifacts = generator = None
+    collect_spark = False
     try:
         with telemetry.span(
             "discharge.execution",
@@ -152,10 +154,11 @@ async def run_application(
                         emit(f"Richiesta pronta: {artifacts.request}", flush=True)
                         record.finish("prepared")
                         return artifacts.directory
-                    model_settings = settings or Settings()
+                    model_settings = settings or Settings().for_model(config.model)
                     if (
                         packet.context.dataset == MIMIC_DATASET
-                        and str(model_settings.base_url).rstrip("/") != SPARK_LLM_URL
+                        and str(model_settings.base_url).rstrip("/")
+                        not in {SPARK_LLM_URL, SPARK_OLLAMA_URL}
                         and model_settings.base_url.host not in {"127.0.0.1", "[::1]", "localhost"}
                     ):
                         raise ValueError(
@@ -187,6 +190,7 @@ async def run_application(
 
                                 generator.partial_callback = save_partial
                             artifacts.start()
+                            collect_spark = model_settings.base_url.host in SPARK_HOSTS
                             progress_task = asyncio.create_task(
                                 _record_progress(generator, artifacts, record, notify)
                             )
@@ -260,4 +264,26 @@ async def run_application(
                 telemetry.record_metrics(record)
     finally:
         record.data["telemetry"] = telemetry.close()
-        record.save()
+        try:
+            if collect_spark:
+                try:
+                    record.data["spark_monitor"] = await asyncio.to_thread(
+                        capture_run, record.path.parents[1], record.data
+                    )
+                except Exception as exc:
+                    record.data["spark_monitor"] = {
+                        "status": "unavailable",
+                        "error_type": type(exc).__name__,
+                    }
+        finally:
+            if not dry_run and packet and packet.context.dataset == MIMIC_DATASET:
+                record.data["test_spark"] = {
+                    "context_id": packet.context.id,
+                    "dataset_version": packet.context.dataset_version,
+                    "artifact_directory": (
+                        artifacts.directory.relative_to(output_dir.resolve()).as_posix()
+                        if artifacts
+                        else None
+                    ),
+                }
+            record.save()

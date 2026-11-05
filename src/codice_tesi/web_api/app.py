@@ -22,7 +22,8 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 
 from codice_tesi.access import LocalIdentity, local_identities
 from codice_tesi.application import run_application
-from codice_tesi.config import ModelConfig
+from codice_tesi.config import ModelConfig, Settings, default_output_dir
+from codice_tesi.discharge.artifacts import DraftContractError
 from codice_tesi.discharge.client import PacketClient
 from codice_tesi.discharge.facts import extract_facts
 from codice_tesi.discharge.limits import (
@@ -61,10 +62,7 @@ def write_json(path: Path, data):
 
 def create_app(*, output_dir: Path | None = None, backend_url: str | None = None):
     identities = local_identities()
-    default_output = (
-        "output/dimissioni-mimic" if os.getenv("APP_MIMIC_TOKEN") else "output/dimissioni"
-    )
-    output = (output_dir or Path(os.getenv("WEB_OUTPUT_DIR", default_output))).resolve()
+    output = (output_dir or Path(os.getenv("WEB_OUTPUT_DIR") or default_output_dir())).resolve()
     backend = backend_url or os.getenv("APP_BACKEND_URL", "http://127.0.0.1:8001")
     sessions = output / "web-sessions"
     tasks: dict[str, asyncio.Task] = {}
@@ -175,6 +173,7 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
                 console=False,
                 catalog=catalog_at(directory, packet),
                 config=ModelConfig(
+                    model=Settings().model,
                     thinking=options.thinking,
                     tools_enabled=options.tools_enabled,
                     total_timeout=options.timeout_seconds,
@@ -249,6 +248,26 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
                     f"Il modello ha chiesto una verifica tramite {exc.tool_name} "
                     "con nome o parametri non validi. La correzione consentita non è riuscita. "
                     "Nessuna bozza completa pubblicata; dettagli del tentativo negli artefatti."
+                ),
+            )
+        except json.JSONDecodeError:
+            update(
+                status="failed",
+                phase="risposta_non_valida",
+                failure_code="invalid_draft_json",
+                detail=(
+                    "Il modello ha restituito una bozza in formato JSON non valido. "
+                    "La risposta grezza è conservata negli artefatti."
+                ),
+            )
+        except DraftContractError:
+            update(
+                status="failed",
+                phase="risposta_non_valida",
+                failure_code="invalid_draft_contract",
+                detail=(
+                    "La bozza non ha superato i controlli su sezioni, contenuto o citazioni. "
+                    "La risposta grezza è conservata negli artefatti."
                 ),
             )
         except UnexpectedModelBehavior:

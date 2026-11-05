@@ -12,11 +12,13 @@ observability/
   compose.yaml       # Phoenix, DB tracce, Collector, Prometheus e volumi
   collector.yaml     # Pipeline OTLP e coda persistente
   prometheus.yaml    # Scrape delle metriche
+  spark_usage.py     # Telemetria DGX Spark e campioni nella finestra di una prova
   .env.example       # Configurazione pubblica per il client sul Mac
   .env               # Configurazione locale esclusa da Git e immagini
   README.md          # Uso, definizioni delle misure e limiti
 src/codice_tesi/observability/
   execution.py       # Registro atomico, manifest ed esportazione CSV/JSONL
+  spark.py           # Acquisizione locale delle misure Spark per run_id
   stream_metrics.py  # Osservazioni dello stream, senza conservarne i testi
   telemetry.py       # Configurazione ed export OpenTelemetry
 tests/observability/ # Test del registro, delle misure e dell'isolamento dei dati
@@ -28,6 +30,10 @@ restano quelli esistenti. Non avviare il Compose incluso come progetto separato.
 Sono richiesti Docker Compose con supporto a `include` (2.20.0 o successivo).
 L'applicazione mantiene soltanto i collegamenti al Collector e ai moduli Python.
 Il registro resta disponibile anche quando l'export è disabilitato.
+
+La [raccolta sul DGX Spark](Monitoraggio_DGX_Spark.md) si avvia automaticamente
+a fine prova e usa gli orari UTC del registro per associare i campioni hardware
+al `run_id`. Lo stato della raccolta compare in `spark_monitor`.
 
 ## Architettura
 

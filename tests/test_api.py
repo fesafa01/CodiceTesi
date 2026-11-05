@@ -9,7 +9,14 @@ from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from codice_tesi import api, main
-from codice_tesi.config import ModelConfig, Settings
+from codice_tesi.config import (
+    DEEPSEEK_MODEL,
+    GEMMA_MODEL,
+    QWEN_MODEL,
+    SPARK_OLLAMA_URL,
+    ModelConfig,
+    Settings,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -74,6 +81,30 @@ def test_model_configuration_is_only_from_python(monkeypatch):
     assert ModelConfig().model == "deepseek-v4-flash"
     assert ModelConfig().temperature == 0.6
     assert ModelConfig().thinking is True
+
+
+def test_model_selection_routes_to_ollama_or_existing_serving(monkeypatch):
+    monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:8000/v1")
+    settings = Settings()
+    assert settings.model == QWEN_MODEL
+    assert str(settings.for_model(QWEN_MODEL).base_url) == SPARK_OLLAMA_URL
+    monkeypatch.setenv("LLM_MODEL", GEMMA_MODEL)
+    monkeypatch.setenv("LLM_OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
+    settings = Settings()
+    assert settings.model == GEMMA_MODEL
+    gemma = settings.for_model(settings.model)
+    assert str(gemma.base_url) == "http://127.0.0.1:11434/v1"
+    assert gemma.api_key.get_secret_value() == "ollama"
+    assert str(settings.for_model(DEEPSEEK_MODEL).base_url) == "http://127.0.0.1:8000/v1"
+    monkeypatch.setenv("LLM_MODEL", DEEPSEEK_MODEL)
+    assert Settings().model == DEEPSEEK_MODEL
+
+
+@pytest.mark.parametrize(("thinking", "effort"), [(True, "low"), (False, "none")])
+def test_qwen_uses_ollama_reasoning_and_json_mode(thinking, effort):
+    settings = ModelConfig(model=QWEN_MODEL, thinking=thinking).request_settings()
+    assert settings["openai_reasoning_effort"] == effort
+    assert settings["extra_body"] == {"response_format": {"type": "json_object"}}
 
 
 @pytest.mark.parametrize("overrides", [{"base_url": "invalid"}, {"timeout": 0}])

@@ -26,7 +26,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.usage import RunUsage, UsageLimits
 
 from codice_tesi import api
-from codice_tesi.config import ModelConfig
+from codice_tesi.config import OLLAMA_MODELS, ModelConfig
 from codice_tesi.discharge.context import PreparedRequest
 from codice_tesi.discharge.limits import (
     EvidenceReadError,
@@ -163,6 +163,9 @@ class LLMDraftGenerator:
             settings["max_tokens"] = min(self.config.max_tokens, remaining)
             if final_reason:
                 self.progress["fase"] = "redazione_finale"
+            elif self.config.model in OLLAMA_MODELS:
+                # La grammatica JSON di Ollama interferisce con la chiamata ai tool.
+                settings.pop("extra_body", None)
             step_budgets.append(
                 {
                     "input_tokens_estimate": estimate,

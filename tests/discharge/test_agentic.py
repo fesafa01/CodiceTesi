@@ -12,7 +12,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import StatusCode
 
 from codice_tesi import api, application
-from codice_tesi.config import ModelConfig
+from codice_tesi.config import DEEPSEEK_MODEL, GEMMA_MODEL, QWEN_MODEL, ModelConfig
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.facts import extract_facts
@@ -698,8 +698,9 @@ def test_derived_tool_spans_share_trace_and_export_only_safe_counters(
 
 
 @pytest.mark.parametrize("invalid_args", [False, True])
+@pytest.mark.parametrize("model", [DEEPSEEK_MODEL, QWEN_MODEL, GEMMA_MODEL])
 def test_final_phase_keeps_prefix_and_blocks_more_reads_without_model_retry(
-    packet_factory, monkeypatch, tmp_path, invalid_args
+    packet_factory, monkeypatch, tmp_path, invalid_args, model
 ):
     from codice_tesi.discharge.tools import DocumentaryTools
 
@@ -741,6 +742,12 @@ def test_final_phase_keeps_prefix_and_blocks_more_reads_without_model_retry(
     def handler(request):
         requests.append(json.loads(request.content))
         assert len(requests) <= 2
+        expected_format = (
+            {"type": "json_object"}
+            if model in {QWEN_MODEL, GEMMA_MODEL} and len(requests) == 2
+            else None
+        )
+        assert requests[-1].get("response_format") == expected_format
         if len(requests) == 2:
             assert requests[1]["tools"] == requests[0]["tools"]
             assert requests[1]["messages"][:2] == requests[0]["messages"]
@@ -765,7 +772,9 @@ def test_final_phase_keeps_prefix_and_blocks_more_reads_without_model_retry(
                 packet=packet_factory("nota"),
                 output_dir=tmp_path,
                 console=False,
-                config=ModelConfig(tools_enabled=True, max_requests=2, max_tokens=8192),
+                config=ModelConfig(
+                    model=model, tools_enabled=True, max_requests=2, max_tokens=8192
+                ),
             )
         )
     assert len(requests) == 2 and len(reads) == 1
