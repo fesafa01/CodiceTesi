@@ -16,16 +16,7 @@ from codice_tesi.observability.spark import save_snapshot
 
 PREFIX = "TEST-CASO-MIMIC-"
 SHEET = "scheda.json"
-RUN_FILES = (
-    "richiesta.txt",
-    "catalogo_evidenze.json",
-    "fatti_documentali.json",
-    "risposta.parziale.json",
-    "bozza_strutturata.json",
-    "evidenze.md",
-    "bozza.txt",
-    "esito.json",
-)
+RESET_MARKER = ".archive-reset"
 logger = logging.getLogger(__name__)
 
 
@@ -65,17 +56,17 @@ def archive_run(destination: Path, record_path: Path, record: dict) -> dict:
         staging = Path(staging)
         if run["artifact_directory"]:
             artifacts = output / run["artifact_directory"]
-            for name in RUN_FILES:
-                source = artifacts / name
-                if source.is_file():
-                    copyfile(source, staging / name)
-                    sheet["artifact_files"].append(name)
             for name in ("bozza.txt", "risposta.parziale.json"):
-                copied = staging / name
-                if copied.is_file() and copied.stat().st_size:
+                source = artifacts / name
+                if source.is_file() and source.stat().st_size:
+                    copyfile(source, staging / name)
                     sheet["draft_file"] = name
+                    sheet["artifact_files"].append(name)
                     break
-        save_snapshot(staging / "registro.json", record)
+            evidence = artifacts / "evidenze.md"
+            if sheet["draft_file"] == "bozza.txt" and evidence.is_file():
+                copyfile(evidence, staging / evidence.name)
+                sheet["artifact_files"].append(evidence.name)
         save_snapshot(
             staging / "metriche.json",
             {
@@ -130,6 +121,10 @@ def archive_reference(directory: Path, sheet: dict, *, base_url: str, token: str
 
 def run_worker(root: Path, output: Path, *, base_url: str, token: str) -> None:
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        reset_at = (root / RESET_MARKER).stat().st_mtime_ns
+    except FileNotFoundError:
+        reset_at = None
     archived = set()
     pending = {}
     number = 0
@@ -147,6 +142,8 @@ def run_worker(root: Path, output: Path, *, base_url: str, token: str) -> None:
             if path.stem in archived:
                 continue
             try:
+                if reset_at is not None and path.stat().st_mtime_ns <= reset_at:
+                    continue
                 record = read_json(path)
                 if not record.get("test_spark"):
                     continue

@@ -484,7 +484,7 @@ def test_agent_api_import_does_not_load_sql_backend_or_driver():
     assert result.returncode == 0, result.stderr
 
 
-def test_web_generation_archives_provider_usage_and_all_artifacts(
+def test_web_generation_archives_provider_usage_and_cited_sources(
     tmp_path, monkeypatch, packet_factory, letter_factory, response_factory
 ):
     from io import StringIO
@@ -600,16 +600,7 @@ def test_web_generation_archives_provider_usage_and_all_artifacts(
         spark_archive.run_worker(archive, root, base_url="http://reference", token=token)
 
     case = archive / "TEST-CASO-MIMIC-1"
-    files = {
-        "richiesta.txt",
-        "catalogo_evidenze.json",
-        "fatti_documentali.json",
-        "risposta.parziale.json",
-        "bozza_strutturata.json",
-        "evidenze.md",
-        "bozza.txt",
-        "esito.json",
-    }
+    files = {"bozza.txt", "evidenze.md"}
     sheet = json.loads((case / "scheda.json").read_text())
     assert set(sheet["artifact_files"]) == files
     assert sheet["run_id"] == state["run_id"]
@@ -619,14 +610,16 @@ def test_web_generation_archives_provider_usage_and_all_artifacts(
     assert sheet["reference"]["status"] == "saved"
     assert set(p.name for p in case.iterdir()) == files | {
         "scheda.json",
-        "registro.json",
         "metriche.json",
         "lettera_ufficiale.txt",
     }
     for name in files:
         assert (case / name).read_bytes() == (artifacts / name).read_bytes()
     assert (case / "lettera_ufficiale.txt").read_text() == "Originale sintetico"
-    assert json.loads((case / "registro.json").read_text()) == record
+    evidence = (case / "evidenze.md").read_text()
+    assert "## 1. " + packet.template.sections[0].title in evidence
+    assert packet.sources[0].text in evidence
+    assert state["result"]["draft"]["sections"][0]["sources"][0]["evidence_ids"][0] in evidence
     metrics = json.loads((case / "metriche.json").read_text())
     assert metrics["token_e_stream"] == record["llm"]
     assert metrics["token_e_stream"]["input_tokens"] == 42

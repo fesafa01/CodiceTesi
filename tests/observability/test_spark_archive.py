@@ -1,5 +1,7 @@
 import io
 import json
+import os
+from shutil import rmtree
 from urllib.error import URLError
 
 import pytest
@@ -100,3 +102,20 @@ def test_archive_keeps_attempts_distinct_and_recovers_reference_after_restart(
     sheet = spark_archive.read_json(second / "scheda.json")
     assert sheet["run_id"] == failed and sheet["status"] == "failed"
     assert sheet["reference"]["note_id"] == "note-1"
+
+    # Un ripristino dell'archivio riparte da 1 e ignora i record precedenti.
+    rmtree(first)
+    rmtree(second)
+    marker = archive / spark_archive.RESET_MARKER
+    marker.touch()
+    reset_at = marker.stat().st_mtime_ns
+    for path in (runs / "registro").glob("*.json"):
+        os.utime(path, ns=(reset_at, reset_at - 1_000_000_000))
+    new_run = create_run(status="completed", filename="bozza.txt", text="Nuova prova")
+    new_path = runs / "registro" / f"{new_run}.json"
+    os.utime(new_path, ns=(reset_at, reset_at + 1_000_000_000))
+
+    scan_once()
+    scan_once()
+    assert {path for path in archive.iterdir() if path.is_dir()} == {first}
+    assert spark_archive.read_json(first / "scheda.json")["run_id"] == new_run

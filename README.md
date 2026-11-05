@@ -67,25 +67,25 @@ delle affermazioni resta da valutare.
 ### Archivio delle prove MIMIC
 
 Lo stack web archivia i nuovi tentativi MIMIC in `$TESI_PRIVATE_DIR/TEST-SPARK/TEST-CASO-MIMIC-1/`,
-`TEST-CASO-MIMIC-2/` e così via. Il numero identifica il tentativo. Ogni cartella
-raccoglie i file disponibili per quella prova.
+`TEST-CASO-MIMIC-2/` e così via. Il numero identifica il tentativo. Dopo una
+generazione riuscita e il recupero dell’originale, la cartella contiene cinque file.
 
+- `bozza.txt` contiene la bozza validata.
+- `evidenze.md` riporta le fonti citate in CAMPUS per ogni sezione della bozza,
+  con gli estratti originali e la loro provenienza.
+- `lettera_ufficiale.txt` contiene l’originale abbinato alla versione del ricovero.
+- `metriche.json` contiene i token e i tempi dello stream, i campioni dello Spark
+  durante la prova e l’energia per la finestra del monitor.
 - `scheda.json` riporta il ricovero, lo stato, il modello richiesto e quello
   riportato dallo stream, il livello di reasoning e l’abilitazione dei tool.
-- `registro.json` conserva il record completo con impostazioni del modello,
-  tempi, versioni e hash.
-- `metriche.json` contiene i token e i tempi dello stream, i campioni dello Spark
-  durante la prova e l’energia per la finestra del monitor. La disponibilità
-  dei valori dipende da quanto riportano il serving e il monitor.
-- `richiesta.txt`, `catalogo_evidenze.json`, `fatti_documentali.json`, `esito.json`
-  e `risposta.parziale.json` documentano richiesta, fonti, esito e risposta grezza.
-  Dopo la validazione si aggiungono `bozza.txt`, `bozza_strutturata.json` ed `evidenze.md`.
-- `lettera_ufficiale.txt` contiene l’originale abbinato alla versione del ricovero.
-  La scheda registra l’identificativo della nota o lo stato del recupero.
 
-L'archivio si aggiorna a fine tentativo, anche se fallisce o viene interrotto.
-Il servizio `spark-archive` ritenta il recupero degli originali
-temporaneamente indisponibili. `TEST-SPARK` resta locale e riservata.
+Per un tentativo fallito o interrotto, l’archivio conserva `risposta.parziale.json`
+quando è disponibile. Il servizio `spark-archive` ritenta il recupero degli
+originali temporaneamente indisponibili. Gli artefatti tecnici completi sono
+nella cartella di esecuzione sotto `output/dimissioni-mimic/`. Se è presente
+`.archive-reset` in `TEST-SPARK`, all’avvio il servizio archivia soltanto i
+record scritti dopo l’ultima modifica del marcatore.
+
 Per MIMIC l'export OTLP è disattivato, quindi i contatori disponibili in questo
 flusso vengono dallo stream del serving e i campioni hardware dal monitor DGX Spark.
 
