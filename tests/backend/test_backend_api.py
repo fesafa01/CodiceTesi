@@ -20,11 +20,11 @@ def test_openapi_contains_only_composition_and_health_routes():
     }
 
 
-def test_template_endpoint_serves_updated_requirements_without_database():
+def test_template_endpoint_serves_updated_requirements_without_database(backend_app):
     # Questo endpoint usa la risorsa inclusa nel pacchetto, senza query SQL.
     client = TestClient(
-        create_app(BackendSettings(_env_file=None)),
-        headers={"Authorization": "Bearer demo-revisore"},
+        backend_app(BackendSettings(_env_file=None)),
+        headers={"Authorization": "Bearer test-revisore"},
     )
     response = client.get("/api/v1/compilazione/template")
     assert response.status_code == 200 and response.json()["version"] == "1.1.0"
@@ -36,16 +36,18 @@ def test_template_endpoint_serves_updated_requirements_without_database():
     assert sections["informazioni_istologico"]["applies_when"]["equals"] is True
 
 
-@pytest.mark.parametrize("command", ["scenario", "import-dataset", "validate-dataset"])
+@pytest.mark.parametrize(
+    "command", ["scenario", "import-dataset", "validate-dataset", "import-synthea"]
+)
 def test_removed_commands_are_rejected(command):
     with pytest.raises(SystemExit) as exc:
         main([command])
     assert exc.value.code == 2
 
 
-def test_request_errors_keep_identifiers_and_do_not_echo_values(empty_settings):
+def test_request_errors_keep_identifiers_and_do_not_echo_values(empty_settings, backend_app):
     with TestClient(
-        create_app(empty_settings), headers={"Authorization": "Bearer demo-revisore"}
+        backend_app(empty_settings), headers={"Authorization": "Bearer test-revisore"}
     ) as client:
         response = client.get(
             "/api/v1/compilazione/avvio-test?seed=private-test-value",

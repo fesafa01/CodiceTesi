@@ -27,7 +27,7 @@ def test_backend_cannot_replace_template(monkeypatch, packet_factory):
         asyncio.run(client.PacketClient("http://test").fetch(seed=42, context_id=None))
 
 
-def test_client_sends_only_selected_demo_credential(monkeypatch, packet_factory):
+def test_client_sends_only_selected_local_credential(monkeypatch, packet_factory):
     packet = packet_factory("triage")
     calls = []
 
@@ -36,7 +36,7 @@ def test_client_sends_only_selected_demo_credential(monkeypatch, packet_factory)
         return BytesIO(packet.model_dump_json().encode())
 
     monkeypatch.setattr(client, "urlopen", fetch)
-    monkeypatch.setenv("APP_BACKEND_TOKEN", "demo-medico-a")
+    monkeypatch.setenv("APP_MIMIC_TOKEN", "demo-medico-a")
     asyncio.run(client.PacketClient("http://test").fetch(seed=42, context_id=None))
     asyncio.run(
         client.PacketClient("http://test", token="demo-medico-b").fetch(seed=42, context_id=None)

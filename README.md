@@ -1,26 +1,55 @@
 # CodiceTesi
 
 Prototipo locale per preparare una bozza di lettera di dimissione nei 17 campi
-Campus, con revisione del medico. Il flusso è fonti FHIR → PostgreSQL → pacchetto
-validato → modello sullo Spark → bozza o parziale con esito. Il percorso ordinario
-usa una richiesta; la modalità opzionale con tool documentali consente approfondimenti
-solo sulle fonti della degenza selezionata.
+Campus, con revisione del medico. Il flusso di valutazione è MIMIC-IV Hosp,
+ED, ICU e referti radiologici → PostgreSQL → pacchetto della degenza → modello sullo Spark →
+bozza CAMPUS. Le discharge summary MIMIC-IV-Note sono conservate separatamente
+per la revisione a posteriori. Il percorso ordinario usa una richiesta. La
+modalità opzionale consente letture documentali nel perimetro della degenza.
 
-Il materiale Synthea attuale è sintetico e provvisorio: include scenari di uscita
-aggiunti da regole riproducibili, senza LLM e senza validazione clinica. Non è il
-dataset definitivo della valutazione. Originali, dati di prova e output rimangono
-esterni al codice versionato.
+## Avvio MIMIC-IV
 
-## Avvio
-
-Dalla cartella del repository, con Docker, Tailscale e serving LLM disponibili:
+Con Docker e i dataset già presenti nella cartella superiore, dalla radice
+del repository:
 
 ```bash
-docker compose up --build -d backend
-# Solo per inizializzare il campione sintetico, quando necessario:
-docker compose run --rm backend-admin import-synthea /dataset --replace
-uv run --locked --no-editable python main.py dimissione --contesto synthea-caso-02 --thinking
+install -d -m 700 var/mimic output/dimissioni-mimic
+docker compose build backend-admin
+docker compose up -d --wait db
+docker compose run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD/../hosp:/mimic/hosp:ro" \
+  -v "$PWD/../mimic-iv-note-deidentified-free-text-clinical-notes-2.2/note:/mimic/note:ro" \
+  -v "$PWD/../mimic-iv-ed-2.2/ed:/mimic/ed:ro" \
+  -v "$PWD/../icu:/mimic/icu:ro" \
+  -v "$PWD/var/mimic:/mimic-private" \
+  backend-admin import-mimic /mimic/hosp /mimic/note \
+    --ed /mimic/ed --icu /mimic/icu --limit 20 --seed 42 \
+    --access-file /mimic-private/access.env
+docker compose up -d --build --wait backend agent-api web
 ```
+
+Una volta importato il campione, basta l'ultimo comando per avviare lo stack.
+La selezione legge i CSV compressi in streaming. `--replace` sostituisce
+soltanto il campione MIMIC. Quando si riscrive il file di accesso, riavviare
+i servizi con `docker compose up -d backend agent-api web`.
+
+Aprire [l'interfaccia locale](http://127.0.0.1:3000) e accedere con utente
+`mimic` e password `APP_MIMIC_TOKEN` dal file privato `var/mimic/access.env`.
+Per la CLI, con Tailscale e serving disponibili:
+
+```bash
+umask 077
+set -a
+source var/mimic/access.env
+set +a
+uv run --locked --no-editable python main.py dimissione \
+  --contesto "${APP_MIMIC_CONTEXTS%%,*}" --no-thinking --no-telemetry \
+  --output-dir output/dimissioni-mimic
+```
+
+Il pairing dei 17 campi, i limiti delle fonti e il comando per confrontare una
+bozza con la relativa lettera sono descritti in [MIMIC e CAMPUS](docs/mimic-campus.md).
+Il [catalogo dei dataset](docs/dataset-mimic.md) include il comando per scaricare ICU.
 
 `--thinking` e `--no-thinking` scelgono la modalità; senza flag vale `ModelConfig`
 in `src/codice_tesi/config.py`. `max_tokens` comprende reasoning e testo; prima
@@ -103,32 +132,12 @@ Il risultato strutturato è versione 1.1, con lettura compatibile dei precedenti
 risultati 1.0. Uso, configurazione, verifiche e limiti nelle
 [integrazioni agentiche](docs/integrazioni-agentiche.md).
 
-## Accessi fittizi locali
+## Accesso locale
 
-Gli endpoint di compilazione richiedono `Authorization: Bearer <token>`;
-gli healthcheck restano pubblici. Credenziali assenti/invalide producono **401**,
-casi fuori assegnazione **403**, anche nella selezione casuale.
-
-| Identità | Token pubblico di prova | Casi |
-|---|---|---|
-| Medico A | `demo-medico-a` | Dispari |
-| Medico B | `demo-medico-b` | Pari |
-| Revisore | `demo-revisore` | Tutti i casi predisposti |
-
-Il client usa il revisore per default; `APP_BACKEND_TOKEN` seleziona un altro
-profilo. Sono identità dimostrative, senza login o servizi esterni.
-
-```bash
-APP_BACKEND_TOKEN=demo-medico-a uv run --locked --no-editable python main.py \
-  dimissione --contesto synthea-caso-01 --dry-run --no-telemetry
-```
-
-Dopo modifiche al client/backend ricostruire le immagini mantenendo i dati:
-
-```bash
-docker compose build app backend
-docker compose up -d --no-deps backend
-```
+Le API cliniche richiedono il Bearer token privato del file `var/mimic/access.env`.
+Le richieste con credenziali assenti o invalide ricevono **401**. Una richiesta per
+un ricovero fuori assegnazione riceve **403**, anche nella selezione casuale.
+Gli healthcheck sono pubblici sul servizio locale.
 
 ## Osservabilità e verifiche
 
@@ -140,9 +149,6 @@ i relativi test sono in `tests/observability/`.
 
 ```bash
 docker compose up -d --wait phoenix-db phoenix otel-collector prometheus
-# Con backend e serving già disponibili:
-docker compose run --rm app dimissione --contesto synthea-caso-02 --thinking \
-  --experiment-file /app/experiments/exploratory.example.json
 uv run --locked --no-editable python main.py registro --format csv \
   --destination output/metriche/esecuzioni.csv
 ```
@@ -164,13 +170,10 @@ Log grezzi, richieste, copie e precedenti documenti generati sono conservati sot
 nuove; la cancellazione dimostrativa opera soltanto su copie censite, senza
 pulizie programmate degli archivi correnti.
 
-## Materiale sintetico e test
+## Test
 
-`scripts/build_discharge_dataset.py` costruisce una nuova cartella da esportazioni
-Synthea (`--population`, `--output`) e può generare popolazioni con `--generate`,
-`--java`, `--jar`. Mantiene gli originali e registra hash e regole delle aggiunte.
-Il campione corrente è atteso nella cartella sorella
-`../datasets_pubblici/synthea_dimissioni`, montata in sola lettura per l'import.
+La suite usa fixture autonome per verificare persistenza, isolamento degli
+accessi, selezione di fonti e contratti delle bozze.
 
 ```bash
 uv sync --locked --extra backend --no-editable
@@ -182,4 +185,4 @@ uv run --locked --extra backend --no-editable pytest -q
 
 I test SQL creano e rimuovono schemi isolati; senza la variabile di connessione
 sono saltati. Le istruzioni per il DB temporaneo della conservazione sono nel
-protocollo. Il progetto rimane una dimostrazione locale su dati sintetici.
+protocollo.

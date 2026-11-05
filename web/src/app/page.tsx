@@ -136,7 +136,7 @@ export default function CasesPage() {
 										<FiUser />
 									</span>
 									<span className="case-info">
-										<strong>{c.id.replace("synthea-caso-", "Caso ")}</strong>
+										<strong>{c.id}</strong>
 										<span>Paziente {c.patient_id ?? "non identificato"}</span>
 										<small>Episodio {c.episode_id ?? "non disponibile"}</small>
 									</span>
@@ -182,7 +182,7 @@ export default function CasesPage() {
 					{current && (
 						<div className="selected-summary">
 							<small>DEGENZA SELEZIONATA</small>
-							<strong>{current.id.replace("synthea-caso-", "Caso ")}</strong>
+							<strong>{current.id}</strong>
 						</div>
 					)}
 					<button

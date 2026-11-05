@@ -5,7 +5,7 @@ import random
 from psycopg.types.json import Jsonb
 
 from codice_tesi.backend.database import Database
-from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
+from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket, Context, EvidenceSource
 from codice_tesi.discharge.template import load_template
 
 
@@ -23,9 +23,10 @@ async def save_dataset(
     sources: list[EvidenceSource],
     *,
     replace: bool = False,
+    references: dict[str, list[dict]] | None = None,
 ) -> tuple[bool, int]:
     """Importa contesti e fonti della stessa versione in una transazione. Il lock serializza
-    import concorrenti; replace sostituisce esplicitamente tutti i contesti attivi."""
+    import concorrenti. La sostituzione è circoscritta al dataset importato."""
     if not contexts:
         raise ValueError("Nessun contesto da importare.")
     context_ids = {context.id for context in contexts}
@@ -37,12 +38,25 @@ async def save_dataset(
     if any(source.context_id not in context_ids for source in sources):
         raise ValueError("Fonte senza contesto nell'importazione.")
     dataset_id, digest = datasets.pop()
+    if (dataset_id == MIMIC_DATASET) != (references is not None):
+        raise ValueError("Le lettere di riferimento appartengono soltanto al dataset MIMIC.")
+    if references is not None and (
+        set(references) != context_ids or any(not notes for notes in references.values())
+    ):
+        raise ValueError("L'importazione richiede lettere di riferimento per ogni ricovero.")
     async with database.connection() as connection:
         # Il lock copre anche l'eventuale sostituzione atomica del dataset.
         await connection.execute("SELECT pg_advisory_xact_lock(183627411)")
         if replace:
-            await connection.execute("DELETE FROM composition_sources")
-            await connection.execute("DELETE FROM composition_contexts")
+            await connection.execute(
+                "DELETE FROM composition_sources WHERE context_id IN "
+                "(SELECT id FROM composition_contexts WHERE payload->>'dataset' = %s)",
+                (dataset_id,),
+            )
+            await connection.execute(
+                "DELETE FROM composition_contexts WHERE payload->>'dataset' = %s",
+                (dataset_id,),
+            )
         cursor = await connection.execute(
             "SELECT DISTINCT payload->>'dataset_version' AS version FROM composition_contexts "
             "WHERE payload->>'dataset' = %s",
@@ -64,6 +78,11 @@ async def save_dataset(
                 "INSERT INTO composition_sources (id, context_id, payload) VALUES (%s, %s, %s)",
                 [(s.id, s.context_id, Jsonb(s.model_dump(mode="json"))) for s in sources],
             )
+            if references is not None:
+                await cursor.executemany(
+                    "INSERT INTO mimic_discharge_references (context_id, notes) VALUES (%s, %s)",
+                    [(context_id, Jsonb(notes)) for context_id, notes in references.items()],
+                )
     return True, len(contexts)
 
 

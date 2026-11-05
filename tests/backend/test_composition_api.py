@@ -1,65 +1,59 @@
 """Importazione atomica e pacchetti HTTP su PostgreSQL reale."""
 
 import asyncio
-import base64
 import hashlib
 import json
 
 import pytest
 from fastapi.testclient import TestClient
 
+from codice_tesi.access import LocalIdentity
 from codice_tesi.backend.app import create_app
 from codice_tesi.backend.database import Database
 from codice_tesi.backend.repository import save_dataset
-from codice_tesi.backend.synthea import import_synthea
-from codice_tesi.demo_access import DemoIdentity
 from codice_tesi.discharge.models import Context, EvidenceSource
 
 
-def test_empty_composition_database_has_actionable_error(empty_settings):
+def test_empty_composition_database_has_actionable_error(empty_settings, backend_app):
     with TestClient(
-        create_app(empty_settings), headers={"Authorization": "Bearer demo-revisore"}
+        backend_app(empty_settings), headers={"Authorization": "Bearer test-revisore"}
     ) as client:
         assert client.get("/api/v1/compilazione/avvio-test?seed=42").status_code == 403
         assert client.get("/api/v1/compilazione/avvio-test?seed=-1").status_code == 422
-        assert (
-            client.get("/api/v1/compilazione/contesti/synthea-caso-30/pacchetto").status_code == 404
-        )
+        assert client.get("/api/v1/compilazione/contesti/case-30/pacchetto").status_code == 404
         template = client.get("/api/v1/compilazione/template")
         assert template.status_code == 200 and template.json()["version"] == "1.1.0"
         assert len(template.json()["sections"]) == 17
 
 
-def test_synthea_import_and_http_isolation(empty_settings, fhir):
-    path = fhir()
-    fhir(case_id="caso_02", patient_id="p2", encounter_id="e2", append=True)
+def test_import_and_http_isolation(empty_settings, episode_rows, backend_app):
+    contexts, sources = episode_rows(["Nota A"], ["Nota B"])
 
     async def prepare():
         async with Database(empty_settings) as db:
-            assert await import_synthea(db, path) == (True, 2)
-            assert await import_synthea(db, path) == (False, 2)
-            index = path / "indice.json"
-            index.write_text(index.read_text() + "\n")
+            assert await save_dataset(db, contexts, sources) == (True, 2)
+            assert await save_dataset(db, contexts, sources) == (False, 2)
+            changed = [context.model_copy(update={"dataset_version": "2"}) for context in contexts]
             with pytest.raises(ValueError, match="differente"):
-                await import_synthea(db, path)
+                await save_dataset(db, changed, sources)
 
     asyncio.run(prepare())
     with TestClient(
-        create_app(empty_settings), headers={"Authorization": "Bearer demo-revisore"}
+        backend_app(empty_settings), headers={"Authorization": "Bearer test-revisore"}
     ) as client:
         first = client.get("/api/v1/compilazione/avvio-test?seed=42").json()
         assert first == client.get("/api/v1/compilazione/avvio-test?seed=42").json()
-        packet = client.get("/api/v1/compilazione/contesti/synthea-caso-01/pacchetto").json()
-        assert packet["context"]["patient_id"] == "p"
-        assert packet["context"]["episode_id"] == "e"
-        assert [s["id"] for s in packet["sources"]] == ["synthea-caso-01-contesto"]
+        packet = client.get("/api/v1/compilazione/contesti/case-01/pacchetto").json()
+        assert packet["context"]["patient_id"] == "patient-1"
+        assert packet["context"]["episode_id"] == "episode-1"
+        assert [s["id"] for s in packet["sources"]] == ["case-01-source-1"]
         assert client.post("/api/v1/compilazione/avvio-test?seed=42").status_code == 405
 
 
 def test_repository_keeps_verified_episode_sources_ordered(empty_settings):
     context = Context(
         id="verified-x",
-        dataset="synthea-dimissioni",
+        dataset="fixture",
         dataset_version="v1",
         scope="episodio",
         patient_id="patient-x",
@@ -85,9 +79,9 @@ def test_repository_keeps_verified_episode_sources_ordered(empty_settings):
             assert await save_dataset(db, [context], sources) == (False, 1)
 
     asyncio.run(prepare())
-    identity = DemoIdentity("fixture", "demo-test", frozenset({"verified-x"}))
+    identity = LocalIdentity("fixture", "demo-test", frozenset({"verified-x"}))
     with TestClient(
-        create_app(empty_settings, demo_identities=(identity,)),
+        create_app(empty_settings, identities=(identity,)),
         headers={"Authorization": "Bearer demo-test"},
     ) as client:
         response = client.get("/api/v1/compilazione/contesti/verified-x/pacchetto")
@@ -99,80 +93,48 @@ def test_repository_keeps_verified_episode_sources_ordered(empty_settings):
         assert packet["template"] == client.get("/api/v1/compilazione/template").json()
 
 
-def test_case_imports_all_notes_once_without_combining_other_patients(empty_settings, fhir):
-    def note(id, text, patient="p", encounter="e"):
-        return {
-            "resourceType": "DocumentReference",
-            "id": id,
-            "subject": {"reference": f"Patient/{patient}"},
-            "context": {"encounter": [{"reference": f"Encounter/{encounter}"}]},
-            "date": "2023-06-21T00:00:00Z",
-            "content": [
-                {
-                    "attachment": {
-                        "contentType": "text/plain",
-                        "data": base64.b64encode(text.encode()).decode(),
-                    }
-                }
-            ],
-        }
-
-    first = note("note-a", "Nota A")
-    duplicate = {
-        "resourceType": "DiagnosticReport",
-        "id": "report-a",
-        "subject": {"reference": "Patient/p"},
-        "encounter": {"reference": "Encounter/e"},
-        "effectiveDateTime": "2023-06-21T00:00:00Z",
-        "presentedForm": [first["content"][0]["attachment"]],
-    }
-    path = fhir([first, note("note-b", "Nota B"), duplicate])
-    fhir(
-        [note("note-c", "Nota C", "p2", "e2")],
-        case_id="caso_02",
-        patient_id="p2",
-        encounter_id="e2",
-        append=True,
-    )
+def test_case_contains_only_its_own_sources(empty_settings, episode_rows, backend_app):
+    contexts, sources = episode_rows(["Nota A", "Nota B"], ["Nota C"])
 
     async def prepare():
         async with Database(empty_settings) as db:
-            assert await import_synthea(db, path) == (True, 2)
-            assert await import_synthea(db, path) == (False, 2)
+            assert await save_dataset(db, contexts, sources) == (True, 2)
+            assert await save_dataset(db, contexts, sources) == (False, 2)
 
     asyncio.run(prepare())
     with TestClient(
-        create_app(empty_settings), headers={"Authorization": "Bearer demo-revisore"}
+        backend_app(empty_settings), headers={"Authorization": "Bearer test-revisore"}
     ) as client:
-        packet = client.get("/api/v1/compilazione/contesti/synthea-caso-01/pacchetto").json()
+        packet = client.get("/api/v1/compilazione/contesti/case-01/pacchetto").json()
         assert packet["context"]["scope"] == "episodio"
         assert set(packet) == {"schema_version", "context", "sources", "template"}
-        notes = [s for s in packet["sources"] if s["kind"].startswith("nota-")]
+        notes = [s for s in packet["sources"] if s["kind"] == "nota"]
         assert len(notes) == 2
-        assert {s["text"].split("\n\n", 1)[1] for s in notes} == {"Nota A", "Nota B"}
+        assert {s["text"] for s in notes} == {"Nota A", "Nota B"}
         assert all("Nota C" not in s["text"] for s in packet["sources"])
         for source in packet["sources"]:
             assert json.dumps(packet).count(json.dumps(source["text"])) == 1
-        other = client.get("/api/v1/compilazione/contesti/synthea-caso-02/pacchetto").json()
-        assert other["context"]["patient_id"] == "p2"
-        notes = [s for s in other["sources"] if s["kind"].startswith("nota-")]
-        assert len(notes) == 1 and notes[0]["text"].endswith("\n\nNota C")
+        other = client.get("/api/v1/compilazione/contesti/case-02/pacchetto").json()
+        assert other["context"]["patient_id"] == "patient-2"
+        notes = [s for s in other["sources"] if s["kind"] == "nota"]
+        assert len(notes) == 1 and notes[0]["text"] == "Nota C"
 
 
-def test_context_listing_comes_from_database_and_respects_assignment(empty_settings, fhir):
-    path = fhir()
-    fhir(case_id="caso_02", patient_id="p2", encounter_id="e2", append=True)
+def test_context_listing_comes_from_database_and_respects_assignment(
+    empty_settings, episode_rows, backend_app
+):
+    contexts, sources = episode_rows(["Nota A"], ["Nota B"])
 
     async def prepare():
         async with Database(empty_settings) as db:
-            await import_synthea(db, path)
+            await save_dataset(db, contexts, sources)
 
     asyncio.run(prepare())
-    with TestClient(create_app(empty_settings)) as client:
+    with TestClient(backend_app(empty_settings)) as client:
         for token, expected in [
-            ("demo-revisore", ["synthea-caso-01", "synthea-caso-02"]),
-            ("demo-medico-a", ["synthea-caso-01"]),
-            ("demo-medico-b", ["synthea-caso-02"]),
+            ("test-revisore", ["case-01", "case-02"]),
+            ("test-medico-a", ["case-01"]),
+            ("test-medico-b", ["case-02"]),
         ]:
             response = client.get(
                 "/api/v1/compilazione/contesti", headers={"Authorization": "Bearer " + token}

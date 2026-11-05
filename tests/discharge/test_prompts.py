@@ -7,8 +7,12 @@ import pytest
 from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
+from codice_tesi.discharge.models import MIMIC_DATASET
 from codice_tesi.discharge.prompts import build_instructions, build_prompt
+from codice_tesi.discharge.provenance import parse_draft, render_draft
+from codice_tesi.discharge.template import MISSING_VALUE
 from codice_tesi.discharge.token_count import TOKENIZER_REVISION, estimate_input_tokens
+from codice_tesi.discharge.validation import validate_draft
 
 
 def test_all_campus_sections_and_subfields_are_in_instructions_in_order(packet_factory):
@@ -49,6 +53,106 @@ def test_requirements_and_histology_empty_cell_rule_reach_model(packet_factory):
     assert "Solo Sì oppure No, senza spiegazioni" in text
     assert "Con No lascia il contenuto vuoto, mantenendo l'intestazione" in text
     assert "segnala il dato mancante nel campo binario e lascia vuoti i dettagli" in text
+
+
+@pytest.mark.parametrize(
+    "kind,origin,text,rule,documented,missing",
+    [
+        pytest.param(
+            "contesto",
+            "hosp/admissions + hosp/patients",
+            "discharge_location=HOME",
+            "riporta la destinazione e segnala",
+            {
+                "condizioni_dimissione": (
+                    "Destinazione amministrativa a domicilio. "
+                    "Stato clinico alla dimissione non documentato."
+                ),
+            },
+            {"motivo_ricovero": MISSING_VALUE},
+            id="solo-destinazione",
+        ),
+        pytest.param(
+            "dati_ricovero",
+            "hosp/prescriptions",
+            "2141-01-02 10:00:00 | Ordine farmacologico in degenza | drug=Farmaco A",
+            "gli ordini in degenza non attestano somministrazioni",
+            {"decorso": "Il 02/01/2141 è documentato un ordine di Farmaco A in degenza."},
+            {"terapia_dimissione": MISSING_VALUE, "programma_followup": ""},
+            id="solo-ordine-in-degenza",
+        ),
+        pytest.param(
+            "dati_ricovero",
+            "hosp/diagnoses_icd",
+            "Diagnosi ICD codificata retrospettivamente | ICD-10: Z00 | seq_num=1",
+            "La descrizione di un codice diagnostico non attesta",
+            {"diagnosi_codificate": "ICD-10 Z00 (codifica amministrativa del ricovero)."},
+            {"diagnosi_dimissione": ""},
+            id="solo-codice-diagnostico",
+        ),
+        pytest.param(
+            "dati_ricovero",
+            "hosp/procedures_icd",
+            "2141-01-02 | Procedura ICD codificata retrospettivamente | ICD-9: 4516 | seq_num=1",
+            "Un codice procedurale, da solo, non attesta",
+            {"procedure_codificate": "ICD-9 4516 (codifica amministrativa del ricovero)."},
+            {"procedure_diagnostiche_terapeutiche": MISSING_VALUE},
+            id="solo-codice-procedurale",
+        ),
+        pytest.param(
+            "referto_radiologico",
+            "note/radiology/referto-di-prova",
+            "Biopsia sotto guida radiologica eseguita.",
+            "Una biopsia senza esito documentato non dimostra che l'istologico sia in attesa",
+            {"procedure_diagnostiche_terapeutiche": "Eseguita biopsia sotto guida radiologica."},
+            {"istologico_in_attesa": MISSING_VALUE, "informazioni_istologico": ""},
+            id="biopsia-senza-esito",
+        ),
+    ],
+)
+def test_mimic_prompt_and_expected_campus_draft(
+    packet_factory, kind, origin, text, rule, documented, missing
+):
+    """Esercita il prompt e il contratto della risposta attesa senza inferenza."""
+    base = packet_factory(kind, text=text)
+    source = base.sources[0].model_copy(update={"origin": origin})
+    packet = base.model_copy(
+        update={
+            "context": base.context.model_copy(update={"dataset": MIMIC_DATASET}),
+            "sources": (source,),
+        }
+    )
+    request = prepare_request(packet, ContextConfig(), output_tokens=512)
+    baseline = prepare_request(base, ContextConfig(), output_tokens=512)
+    assert request.prompt_version != baseline.prompt_version
+    assert "# Guida alle fonti MIMIC-IV" not in baseline.instructions
+    assert rule in request.instructions
+    assert "una sintesi anche di una sola frase" in request.instructions
+    assert f'Origine: "{origin}"' in request.prompt
+    assert request.prompt.count(text) == 1
+    assert request.instructions.count("ID canonico:") == len(packet.template.sections) == 17
+
+    for section_id in documented.keys() & {"diagnosi_codificate", "procedure_codificate"}:
+        guide = request.instructions.split(f"ID canonico: {section_id}\n")[1].split("\n\n")[0]
+        assert f"Trascrivi i codici letterali da {origin}" in guide
+        assert "associate alla dimissione" not in guide
+
+    citation = {
+        "source_id": source.id,
+        "evidence_ids": [e.id for e in request.catalog.evidences if e.source_id == source.id],
+    }
+    sections = []
+    for section in packet.template.sections:
+        default = MISSING_VALUE if section.requirement.status in {"required", "unconfirmed"} else ""
+        sections.append(
+            {
+                "section_id": section.id,
+                "text": documented.get(section.id, missing.get(section.id, default)),
+                "sources": [citation] if section.id in documented else [],
+            }
+        )
+    expected = parse_draft(json.dumps({"sections": sections}), request.catalog, packet.template)
+    validate_draft(render_draft(expected, packet.template), packet.template)
 
 
 def test_request_rejects_context_budget_before_inference_without_truncating_notes(packet_factory):

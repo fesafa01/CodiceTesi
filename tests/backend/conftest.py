@@ -2,7 +2,6 @@
 
 import asyncio
 import hashlib
-import json
 import os
 from uuid import uuid4
 
@@ -10,54 +9,55 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from codice_tesi.access import LocalIdentity
+from codice_tesi.backend.app import create_app
 from codice_tesi.backend.database import BackendSettings, Database, initialize_database
+from codice_tesi.discharge.models import Context, EvidenceSource
 
 
 @pytest.fixture
-def fhir(tmp_path):
-    """Piccoli bundle FHIR di test, indipendenti dai pazienti del dataset locale."""
+def assigned_identities():
+    return (
+        LocalIdentity("medico-a", "test-medico-a", frozenset({"case-01"})),
+        LocalIdentity("medico-b", "test-medico-b", frozenset({"case-02"})),
+        LocalIdentity("revisore", "test-revisore", frozenset({"case-01", "case-02", "case-30"})),
+    )
 
-    def write(
-        extra=(),
-        *,
-        main_updates=None,
-        case_id="caso_01",
-        patient_id="p",
-        encounter_id="e",
-        append=False,
-    ):
-        resources = [
-            {"resourceType": "Patient", "id": patient_id, "gender": "female"},
-            {
-                "resourceType": "Encounter",
-                "id": encounter_id,
-                "status": "finished",
-                "class": {"code": "IMP"},
-                "subject": {"reference": f"Patient/{patient_id}"},
-                "period": {"start": "2023-06-20T07:00:00Z", "end": "2023-06-23T12:00:00Z"},
-                **(main_updates or {}),
-            },
-        ]
-        raw = json.dumps(
-            {"resourceType": "Bundle", "entry": [{"resource": r} for r in resources + list(extra)]}
-        ).encode()
-        file = "patient.json" if case_id == "caso_01" else f"{case_id}.json"
-        (tmp_path / file).write_bytes(raw)
-        index = tmp_path / "indice.json"
-        rows = json.loads(index.read_text()) if append and index.exists() else []
-        rows.append(
-            {
-                "case_id": case_id,
-                "patient_id": patient_id,
-                "encounter_id": encounter_id,
-                "fhir_file": file,
-                "sha256": hashlib.sha256(raw).hexdigest(),
-            }
-        )
-        index.write_text(json.dumps(rows))
-        return tmp_path
 
-    return write
+@pytest.fixture
+def backend_app(assigned_identities):
+    return lambda settings: create_app(settings, identities=assigned_identities)
+
+
+@pytest.fixture
+def episode_rows():
+    def build(*notes_by_episode):
+        contexts, sources = [], []
+        for number, notes in enumerate(notes_by_episode, 1):
+            context = Context(
+                id=f"case-{number:02}",
+                dataset="fixture",
+                dataset_version="1",
+                scope="episodio",
+                patient_id=f"patient-{number}",
+                episode_id=f"episode-{number}",
+            )
+            contexts.append(context)
+            for index, text in enumerate(notes, 1):
+                sources.append(
+                    EvidenceSource(
+                        id=f"{context.id}-source-{index}",
+                        context_id=context.id,
+                        kind="nota",
+                        text=text,
+                        origin="fixture",
+                        version="1",
+                        sha256=hashlib.sha256(text.encode()).hexdigest(),
+                    )
+                )
+        return contexts, sources
+
+    return build
 
 
 @pytest.fixture

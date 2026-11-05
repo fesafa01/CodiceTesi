@@ -68,7 +68,7 @@ async function proxy(request: NextRequest, path: string[]) {
 			cache: "no-store",
 			signal: isStream ? request.signal : AbortSignal.timeout(30_000),
 			headers: {
-				Authorization: `Bearer ${process.env.APP_BACKEND_TOKEN ?? "demo-revisore"}`,
+				...(process.env.APP_MIMIC_TOKEN && { Authorization: `Bearer ${process.env.APP_MIMIC_TOKEN}` }),
 				"Content-Type": "application/json",
 			},
 			body: request.method === "POST" ? await request.text() : undefined,

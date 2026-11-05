@@ -11,13 +11,13 @@ docker compose up -d --build web
 ```
 
 Aprire [http://localhost:3000](http://localhost:3000). Il comando aggiorna anche
-backend e agent-api; mantiene il volume PostgreSQL esistente. L’import del dataset
-resta esplicito, come descritto nel README principale.
+backend e agent-api e riusa il volume PostgreSQL. L’import del campione MIMIC e
+le credenziali per l'accesso locale sono descritti nel [README principale](../README.md).
 
 ## Flusso
 
 1. La prima pagina legge `GET /api/v1/compilazione/contesti`: i casi provengono
-   da PostgreSQL e sono filtrati per le assegnazioni dell’identità demo.
+   da PostgreSQL e sono filtrati per le assegnazioni dell'identità locale.
 2. “Continua” chiama agent-api per recuperare il pacchetto della degenza e
    conservarne uno snapshot. Nella seconda pagina compaiono le 17 sezioni Campus,
    gli identificativi verificati e tutte le fonti disponibili.
@@ -80,13 +80,15 @@ verificare separatamente. Dettagli nelle
 - `agent-api` (porta interna 8002): preparazione, generazione e stato.
 - `backend` (porta 8001): lettura dei dati clinici dal DB.
 
-Il token demo è solo sul server Next.js, configurato con `APP_BACKEND_TOKEN`
-(default `demo-revisore`). Cambiare token richiede di ricreare il servizio web.
+In modalità MIMIC, web e API richiedono la credenziale del file privato
+`var/mimic/access.env`. Next.js richiede l'accesso Basic e inoltra alle API il
+token Bearer.
 Non sono presenti credenziali LLM nel browser. Le altre variabili server sono
 `APP_BACKEND_URL` e `AGENT_API_URL`. agent-api legge la configurazione LLM e
 l’osservabilità già usate dal client CLI.
 
-Snapshot e stati web sono in `output/dimissioni/web-sessions/<uuid>/`;
+Snapshot e stati web sono in `output/dimissioni-mimic/web-sessions/<uuid>/`
+per MIMIC.
 `preview.json` conserva l'ultima anteprima e `editor.json` i testi manuali con
 numero di revisione. Un salvataggio da una scheda non aggiornata riceve 409,
 senza sovrascrivere le modifiche dell'altra scheda. I testi manuali non sono

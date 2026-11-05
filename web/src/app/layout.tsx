@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
 	title: "Dimissioni · Assistente documentale",
 	description:
-		"Preparazione della lettera di dimissione da fonti cliniche sintetiche.",
+		"Preparazione della lettera di dimissione da fonti cliniche.",
 };
 export default function RootLayout({
 	children,
@@ -26,7 +26,7 @@ export default function RootLayout({
 						</Link>
 						<span className="demo-badge">
 							<span className="dot" />
-							Ambiente di ricerca · Dati sintetici
+							Ambiente di ricerca · Accesso locale
 						</span>
 					</div>
 				</header>

@@ -20,9 +20,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 
+from codice_tesi.access import LocalIdentity, local_identities
 from codice_tesi.application import run_application
 from codice_tesi.config import ModelConfig
-from codice_tesi.demo_access import DEMO_IDENTITIES, DemoIdentity
 from codice_tesi.discharge.client import PacketClient
 from codice_tesi.discharge.facts import extract_facts
 from codice_tesi.discharge.limits import (
@@ -38,7 +38,7 @@ from codice_tesi.http_auth import require_identity
 from codice_tesi.web_api.drafts import EditorBody, preview_sections
 
 logger = logging.getLogger(__name__)
-Identity = Annotated[DemoIdentity, Depends(require_identity)]
+Identity = Annotated[LocalIdentity, Depends(require_identity)]
 
 
 class PrepareBody(BaseModel):
@@ -60,7 +60,11 @@ def write_json(path: Path, data):
 
 
 def create_app(*, output_dir: Path | None = None, backend_url: str | None = None):
-    output = (output_dir or Path(os.getenv("WEB_OUTPUT_DIR", "output/dimissioni"))).resolve()
+    identities = local_identities()
+    default_output = (
+        "output/dimissioni-mimic" if os.getenv("APP_MIMIC_TOKEN") else "output/dimissioni"
+    )
+    output = (output_dir or Path(os.getenv("WEB_OUTPUT_DIR", default_output))).resolve()
     backend = backend_url or os.getenv("APP_BACKEND_URL", "http://127.0.0.1:8001")
     sessions = output / "web-sessions"
     tasks: dict[str, asyncio.Task] = {}
@@ -82,7 +86,7 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
         await asyncio.gather(*tasks.values(), return_exceptions=True)
 
     app = FastAPI(title="API interfaccia dimissioni", lifespan=lifespan)
-    app.state.demo_identities = DEMO_IDENTITIES
+    app.state.identities = identities
 
     @app.middleware("http")
     async def no_cache(request, call_next):
@@ -91,7 +95,7 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
 
-    def session(session_id: UUID, identity: DemoIdentity):
+    def session(session_id: UUID, identity: LocalIdentity):
         directory = sessions / str(session_id)
         try:
             packet = CompositionPacket.model_validate_json((directory / "packet.json").read_text())

@@ -1,1 +1,1 @@
-"""Backend dei ricoveri Synthea indipendente dall’inferenza del modello."""
+"""Backend documentale indipendente dall’inferenza del modello."""

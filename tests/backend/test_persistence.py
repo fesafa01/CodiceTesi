@@ -10,7 +10,6 @@ from codice_tesi.backend.app import create_app
 from codice_tesi.backend.cli import main
 from codice_tesi.backend.database import Database, initialize_database
 from codice_tesi.backend.repository import read_packet, save_dataset
-from codice_tesi.backend.synthea import import_synthea, load_synthea
 
 
 def test_init_is_idempotent_and_creates_only_document_tables(empty_settings, monkeypatch, capsys):
@@ -29,6 +28,7 @@ def test_init_is_idempotent_and_creates_only_document_tables(empty_settings, mon
                 assert {r["tablename"] for r in await cursor.fetchall()} == {
                     "composition_contexts",
                     "composition_sources",
+                    "mimic_discharge_references",
                 }
                 cursor = await connection.execute("SELECT count(*) AS n FROM composition_contexts")
                 assert (await cursor.fetchone())["n"] == 0
@@ -36,15 +36,15 @@ def test_init_is_idempotent_and_creates_only_document_tables(empty_settings, mon
     asyncio.run(verify())
 
 
-def test_reinitialization_preserves_imported_data(empty_settings, fhir):
-    path = fhir()
+def test_reinitialization_preserves_imported_data(empty_settings, episode_rows):
+    rows = episode_rows(["Nota A"])
 
     async def verify():
         async with Database(empty_settings) as db:
-            await import_synthea(db, path)
-            before = await read_packet(db, context_id="synthea-caso-01")
+            await save_dataset(db, *rows)
+            before = await read_packet(db, context_id="case-01")
             await initialize_database(db)
-            assert await read_packet(db, context_id="synthea-caso-01") == before
+            assert await read_packet(db, context_id="case-01") == before
             with pytest.raises(ReadOnlySqlTransaction):
                 async with db.connection(read_only=True) as connection:
                     await connection.execute("DELETE FROM composition_sources")
@@ -52,14 +52,13 @@ def test_reinitialization_preserves_imported_data(empty_settings, fhir):
     asyncio.run(verify())
 
 
-def test_failed_source_insert_rolls_back_new_context(empty_settings, fhir):
-    path = fhir()
-    _, loaded = load_synthea(path)
-    context, source = loaded[0]
+def test_failed_source_insert_rolls_back_new_context(empty_settings, episode_rows):
+    contexts, sources = episode_rows(["Nota A"])
+    context, source = contexts[0], sources[0]
 
     async def verify():
         async with Database(empty_settings) as db:
-            await import_synthea(db, path)
+            await save_dataset(db, contexts, sources)
             other = context.model_copy(update={"id": "other", "dataset": "other"})
             duplicate = source.model_copy(update={"context_id": other.id})
             with pytest.raises(UniqueViolation):

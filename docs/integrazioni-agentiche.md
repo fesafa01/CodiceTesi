@@ -31,11 +31,13 @@ senza catalogo lo costruiscono dalle proprie fonti al primo utilizzo.
 
 ## Fatti e rilievi documentali
 
-L'estrazione deterministica legge i record testuali già prodotti dall'adattatore
-FHIR Synthea, senza richiedere una nuova importazione del DB. Riconosce
+L'estrazione deterministica supporta la rappresentazione testuale FHIR
+degli artefatti storici e delle fixture. Riconosce
 `Observation`, `MedicationRequest`, `MedicationAdministration` e `Procedure`.
 Ogni fatto conserva tipo, etichetta, data presente nel record, stato, attributi
-documentati e collegamento a fonte/evidenza.
+documentati e collegamento a fonte/evidenza. Nel pilota MIMIC i passaggi
+delle fonti sono leggibili, mentre gli aggregatori di questo formato storico
+non coprono i record tabellari MIMIC.
 
 Per le osservazioni semplici vengono separati valore, eventuale comparatore e
 unità. Pannelli, range e interpretazioni più complessi rimangono nel dettaglio

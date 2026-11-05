@@ -20,8 +20,7 @@ from psycopg import sql
 
 from codice_tesi.backend.database import BackendSettings, Database, initialize_database
 from codice_tesi.backend.repository import save_dataset
-from codice_tesi.backend.synthea import load_synthea
-from codice_tesi.discharge.models import CompositionPacket
+from codice_tesi.discharge.models import CompositionPacket, Context, EvidenceSource
 from codice_tesi.discharge.template import load_template
 from codice_tesi.retention_demo import (
     MARKER,
@@ -159,9 +158,6 @@ async def exercise(root, settings, packets):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument(
-        "--synthetic-data", type=Path, default=Path("../datasets_pubblici/synthea_dimissioni")
-    )
     args = parser.parse_args()
     url = os.getenv("RETENTION_DEMO_POSTGRES_URL", "")
     parsed = urlsplit(url)
@@ -169,38 +165,29 @@ def main():
         parser.error(
             "Usare RETENTION_DEMO_POSTGRES_URL sul PostgreSQL temporaneo locale, porta 15435."
         )
-    original_hashes = hashes(args.synthetic_data)
-    _, loaded = load_synthea(args.synthetic_data)
-    contexts = {context.id: context for context, _ in loaded}
-    selected = sorted(contexts)[:3]
-    if len(selected) != 3:
-        parser.error("Servono almeno tre contesti sintetici per la prova.")
     packets = []
-    for index, context_id in enumerate(selected):
-        marker = ("RETENTION_EXPIRED_SYNTHETIC", "RETENTION_FRESH_SYNTHETIC", "RETENTION_CONTROL")[
-            index
-        ]
-        sources = []
-        for context, source in loaded:
-            if context.id == context_id:
-                text = source.text + "\n" + marker
-                sources.append(
-                    source.model_copy(
-                        update={
-                            "text": text,
-                            "sha256": hashlib.sha256(text.encode()).hexdigest(),
-                            "version": "retention-demo-v1",
-                        }
-                    )
-                )
+    for index, marker in enumerate(
+        ("RETENTION_EXPIRED_SYNTHETIC", "RETENTION_FRESH_SYNTHETIC", "RETENTION_CONTROL")
+    ):
+        context = Context(
+            id=f"retention-{index}",
+            dataset="fixture-retention",
+            dataset_version="1",
+            scope="episodio",
+            patient_id=f"patient-{index}",
+            episode_id=f"episode-{index}",
+        )
+        source = EvidenceSource(
+            id=f"{context.id}-source",
+            context_id=context.id,
+            kind="nota",
+            origin="fixture",
+            text=marker,
+            version="1",
+            sha256=hashlib.sha256(marker.encode()).hexdigest(),
+        )
         packets.append(
-            CompositionPacket(
-                context=contexts[context_id].model_copy(
-                    update={"dataset_version": "retention-demo-v1"}
-                ),
-                sources=tuple(sorted(sources, key=lambda source: source.id)),
-                template=load_template(),
-            )
+            CompositionPacket(context=context, sources=(source,), template=load_template())
         )
     args.output.mkdir(parents=True, exist_ok=False)
     root = args.output / "sandbox"
@@ -213,14 +200,12 @@ def main():
     finally:
         with psycopg.connect(url, autocommit=True) as connection:
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
-    assert hashes(args.synthetic_data) == original_hashes
     report = {
         "timestamp_utc": datetime.now(UTC).isoformat(),
         "policy_version": "demo-1.0",
         "clock": "simulated; no system clock change",
         "inference_performed": False,
-        "original_files_checked": len(original_hashes),
-        "originals_unchanged": True,
+        "dataset_scope": "self-contained fixtures",
         "database_scope": schema,
         "temporary_schema_removed": True,
         "telemetry_scope": "file fixtures, not live Phoenix/Prometheus/Collector stores",
@@ -230,7 +215,7 @@ def main():
     (args.output / "risultati.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     )
-    print("Verifica superata: anteprima, scadenze, backup, PostgreSQL e controllo degli originali.")
+    print("Verifica superata: anteprima, scadenze, backup, PostgreSQL e isolamento del controllo.")
     return 0
 
 

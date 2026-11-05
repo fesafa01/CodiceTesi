@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import secrets
 from collections.abc import Callable
 from contextlib import aclosing
@@ -9,14 +10,14 @@ from hashlib import sha256
 from pathlib import Path
 
 from codice_tesi import api
-from codice_tesi.config import ModelConfig, Settings
+from codice_tesi.config import SPARK_LLM_URL, ModelConfig, Settings
 from codice_tesi.discharge.artifacts import RunArtifacts
 from codice_tesi.discharge.client import PacketClient
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.generator import LLMDraftGenerator
 from codice_tesi.discharge.limits import execution_deadline
-from codice_tesi.discharge.models import CompositionPacket
+from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
 from codice_tesi.discharge.provenance import EvidenceCatalog
 from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfig
 from codice_tesi.observability.model_spans import agent_attributes, prompt_attributes
@@ -61,6 +62,8 @@ async def run_application(
         context_id = packet.context.id
     config = config or ModelConfig()
     context_config = context_config or ContextConfig()
+    if os.getenv("APP_MIMIC_TOKEN") or (packet and packet.context.dataset == MIMIC_DATASET):
+        telemetry_config = TelemetryConfig(enabled=False)
     telemetry_config = telemetry_config or TelemetryConfig()
     record = ExecutionRecord(
         output_dir,
@@ -149,6 +152,15 @@ async def run_application(
                         emit(f"Richiesta pronta: {artifacts.request}", flush=True)
                         record.finish("prepared")
                         return artifacts.directory
+                    model_settings = settings or Settings()
+                    if (
+                        packet.context.dataset == MIMIC_DATASET
+                        and str(model_settings.base_url).rstrip("/") != SPARK_LLM_URL
+                        and model_settings.base_url.host not in {"127.0.0.1", "[::1]", "localhost"}
+                    ):
+                        raise ValueError(
+                            "Per MIMIC usare un serving locale o lo Spark configurato."
+                        )
                     emit(
                         "Redazione delle sezioni e citazioni in JSON. "
                         "Ctrl+C conserva la risposta parziale.\n",
@@ -159,7 +171,7 @@ async def run_application(
                     with artifacts.open_draft(
                         validation_context=lambda: telemetry.stage(record, "validate_and_save")
                     ) as output:
-                        async with api.create_client(settings or Settings()) as client:
+                        async with api.create_client(model_settings) as client:
                             generator = LLMDraftGenerator(config, client)
                             generator.telemetry = telemetry
                             if config.tools_enabled:
@@ -196,7 +208,8 @@ async def run_application(
                                                     output.flush()
                                                     if on_text:
                                                         on_text(chunk, config.tools_enabled)
-                                                    emit(chunk, end="", flush=True)
+                                                    if packet.context.dataset != MIMIC_DATASET:
+                                                        emit(chunk, end="", flush=True)
                                         finally:
                                             metrics = generator.usage.get("metrics", {})
                                             agent_span.set_attributes(

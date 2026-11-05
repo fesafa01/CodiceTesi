@@ -290,7 +290,7 @@ export default function LetterPage({
 					</Link>
 					<h1>Lettera di dimissione</h1>
 					<p>
-						{packet.context.id.replace("synthea-caso-", "Caso ")}{" "}
+						{packet.context.id}{" "}
 						<span className="separator">/</span> Template Campus{" "}
 						{packet.template.version}
 					</p>

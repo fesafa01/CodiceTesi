@@ -6,23 +6,22 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
+from codice_tesi.access import LocalIdentity, local_identities
 from codice_tesi.backend.app import create_app
 from codice_tesi.backend.database import BackendSettings, Database
-from codice_tesi.backend.repository import BackendError, read_packet
-from codice_tesi.backend.synthea import import_synthea
-from codice_tesi.demo_access import DEMO_IDENTITIES, DemoIdentity
+from codice_tesi.backend.repository import BackendError, read_packet, save_dataset
 
 PREFIX = "/api/v1/compilazione"
 
 
 @pytest.mark.parametrize(
     "path",
-    ["/template", "/contesti", "/avvio-test?seed=42", "/contesti/synthea-caso-01/pacchetto"],
+    ["/template", "/contesti", "/avvio-test?seed=42", "/contesti/case-01/pacchetto"],
 )
 @pytest.mark.parametrize("authorization", [None, "Basic demo", "Bearer errato", "Bearer"])
-def test_credentials_required_before_reading_any_data(path, authorization):
+def test_credentials_required_before_reading_any_data(path, authorization, backend_app):
     # Nessun lifespan/DB: se la richiesta raggiungesse il repository fallirebbe.
-    client = TestClient(create_app(BackendSettings(_env_file=None)))
+    client = TestClient(backend_app(BackendSettings(_env_file=None)))
     headers = {} if authorization is None else {"Authorization": authorization}
     response = client.get(PREFIX + path, headers=headers)
     assert response.status_code == 401
@@ -34,36 +33,36 @@ def test_credentials_required_before_reading_any_data(path, authorization):
     assert "errato" not in response.text
 
 
-@pytest.mark.parametrize("context_id", ["synthea-caso-02", "inesistente"])
-def test_out_of_scope_is_denied_before_database_access(context_id, caplog):
-    client = TestClient(create_app(BackendSettings(_env_file=None)))
+@pytest.mark.parametrize("context_id", ["case-02", "inesistente"])
+def test_out_of_scope_is_denied_before_database_access(context_id, caplog, backend_app):
+    client = TestClient(backend_app(BackendSettings(_env_file=None)))
     with caplog.at_level(logging.INFO, logger="clinical_backend"):
         response = client.get(
             PREFIX + f"/contesti/{context_id}/pacchetto",
-            headers={"Authorization": "Bearer demo-medico-a"},
+            headers={"Authorization": "Bearer test-medico-a"},
         )
     assert response.status_code == 403 and response.json()["title"] == "ACCESSO_NEGATO"
     assert context_id not in response.text
-    assert "demo-medico-a" not in caplog.text
-    assert '"demo_subject": "medico-a"' in caplog.text
+    assert "test-medico-a" not in caplog.text
+    assert '"local_subject": "medico-a"' in caplog.text
 
 
-def test_template_and_health_have_explicit_access_policy():
-    app = create_app(BackendSettings(_env_file=None))
+def test_template_and_health_have_explicit_access_policy(backend_app, assigned_identities):
+    app = backend_app(BackendSettings(_env_file=None))
     client = TestClient(app)
     assert client.get("/health/live").status_code == 200
-    for identity in DEMO_IDENTITIES:
+    for identity in assigned_identities:
         response = client.get(
             PREFIX + "/template", headers={"Authorization": "Bearer " + identity.token}
         )
         assert response.status_code == 200 and len(response.json()["sections"]) == 17
     schema = app.openapi()
-    assert schema["paths"][PREFIX + "/template"]["get"]["security"] == [{"IdentitaLocaleDemo": []}]
+    assert schema["paths"][PREFIX + "/template"]["get"]["security"] == [{"IdentitaLocale": []}]
     assert "security" not in schema["paths"]["/health/live"]["get"]
 
 
-def test_invalid_credential_does_not_leak_into_errors_or_logs(caplog):
-    client = TestClient(create_app(BackendSettings(_env_file=None)))
+def test_invalid_credential_does_not_leak_into_errors_or_logs(caplog, backend_app):
+    client = TestClient(backend_app(BackendSettings(_env_file=None)))
     token = "PRIVATE_INVALID_TOKEN"
     with caplog.at_level(logging.INFO, logger="clinical_backend"):
         response = client.get(PREFIX + "/template", headers={"Authorization": "Bearer " + token})
@@ -71,11 +70,11 @@ def test_invalid_credential_does_not_leak_into_errors_or_logs(caplog):
     assert token not in response.text and token not in caplog.text
 
 
-def test_identity_configuration_cannot_silently_disable_access_checks():
-    identity = DEMO_IDENTITIES[0]
-    for identities in [(), (identity, identity), (DemoIdentity("x", "", frozenset()),)]:
-        with pytest.raises(ValueError, match="identità demo"):
-            create_app(BackendSettings(_env_file=None), demo_identities=identities)
+def test_identity_configuration_cannot_silently_disable_access_checks(assigned_identities):
+    identity = assigned_identities[0]
+    for identities in [(), (identity, identity), (LocalIdentity("x", "", frozenset()),)]:
+        with pytest.raises(ValueError, match="identità locali"):
+            create_app(BackendSettings(_env_file=None), identities=identities)
 
 
 def test_repository_denies_explicit_and_empty_scope_without_connection():
@@ -88,19 +87,20 @@ def test_repository_denies_explicit_and_empty_scope_without_connection():
         assert error.value.status == 403
 
 
-def test_cases_and_random_selection_respect_assigned_scope(empty_settings, fhir):
-    path = fhir()
-    fhir(case_id="caso_02", patient_id="p2", encounter_id="e2", append=True)
+def test_cases_and_random_selection_respect_assigned_scope(
+    empty_settings, episode_rows, backend_app
+):
+    rows = episode_rows(["Nota A"], ["Nota B"])
 
     async def prepare():
         async with Database(empty_settings) as database:
-            await import_synthea(database, path)
+            await save_dataset(database, *rows)
 
     asyncio.run(prepare())
-    with TestClient(create_app(empty_settings)) as client:
+    with TestClient(backend_app(empty_settings)) as client:
         for identity, allowed, denied in [
-            ("demo-medico-a", "synthea-caso-01", "synthea-caso-02"),
-            ("demo-medico-b", "synthea-caso-02", "synthea-caso-01"),
+            ("test-medico-a", "case-01", "case-02"),
+            ("test-medico-b", "case-02", "case-01"),
         ]:
             headers = {"Authorization": "Bearer " + identity}
             response = client.get(PREFIX + f"/contesti/{allowed}/pacchetto", headers=headers)
@@ -113,26 +113,37 @@ def test_cases_and_random_selection_respect_assigned_scope(empty_settings, fhir)
                 selected = client.get(PREFIX + f"/avvio-test?seed={seed}", headers=headers)
                 assert selected.status_code == 200
                 assert selected.json()["context"]["id"] == allowed
-        for context_id in ["synthea-caso-01", "synthea-caso-02"]:
+        for context_id in ["case-01", "case-02"]:
             assert (
                 client.get(
                     PREFIX + f"/contesti/{context_id}/pacchetto",
-                    headers={"Authorization": "Bearer demo-revisore"},
+                    headers={"Authorization": "Bearer test-revisore"},
                 ).status_code
                 == 200
             )
 
 
-def test_random_selection_cannot_fall_back_to_someone_elses_case(empty_settings, fhir):
-    path = fhir()  # È presente soltanto il caso 01, assegnato al medico A.
+def test_random_selection_cannot_fall_back_to_someone_elses_case(
+    empty_settings, episode_rows, backend_app
+):
+    rows = episode_rows(["Nota A"])  # Solo il caso 01, assegnato al medico A.
 
     async def prepare():
         async with Database(empty_settings) as database:
-            await import_synthea(database, path)
+            await save_dataset(database, *rows)
 
     asyncio.run(prepare())
-    with TestClient(create_app(empty_settings)) as client:
+    with TestClient(backend_app(empty_settings)) as client:
         response = client.get(
-            PREFIX + "/avvio-test?seed=42", headers={"Authorization": "Bearer demo-medico-b"}
+            PREFIX + "/avvio-test?seed=42", headers={"Authorization": "Bearer test-medico-b"}
         )
         assert response.status_code == 403 and "sources" not in response.json()
+
+
+def test_missing_mimic_configuration_grants_no_default_access(monkeypatch):
+    monkeypatch.delenv("APP_MIMIC_TOKEN", raising=False)
+    monkeypatch.delenv("APP_MIMIC_CONTEXTS", raising=False)
+    assert local_identities() == ()
+    client = TestClient(create_app(BackendSettings(_env_file=None)))
+    response = client.get(PREFIX + "/template", headers={"Authorization": "Bearer demo-revisore"})
+    assert response.status_code == 401

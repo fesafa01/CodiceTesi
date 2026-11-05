@@ -15,10 +15,10 @@ from psycopg import Error as DatabaseError
 from psycopg_pool import PoolTimeout
 from starlette.exceptions import HTTPException
 
+from codice_tesi.access import LocalIdentity, local_identities
 from codice_tesi.backend.auth import require_context_identity
 from codice_tesi.backend.database import BackendSettings, Database
 from codice_tesi.backend.repository import BackendError, list_contexts, read_packet
-from codice_tesi.demo_access import DEMO_IDENTITIES, DemoIdentity
 from codice_tesi.discharge.models import CompositionPacket, Context
 from codice_tesi.discharge.template import LetterTemplate, load_template
 from codice_tesi.http_auth import require_identity
@@ -40,7 +40,7 @@ async def active_template():
 @router.get("/contesti", response_model=list[Context])
 async def contexts(
     request: Request,
-    identity: Annotated[DemoIdentity, Depends(require_identity)],
+    identity: Annotated[LocalIdentity, Depends(require_identity)],
 ):
     return await list_contexts(request.app.state.database, allowed_context_ids=identity.context_ids)
 
@@ -49,9 +49,9 @@ async def contexts(
 async def bootstrap(
     request: Request,
     seed: Annotated[int, Query(ge=0)],
-    identity: Annotated[DemoIdentity, Depends(require_identity)],
+    identity: Annotated[LocalIdentity, Depends(require_identity)],
 ):
-    """Seleziona soltanto fra i contesti assegnati all'identità fittizia."""
+    """Seleziona soltanto fra i contesti assegnati all'identità locale."""
     return await read_packet(
         request.app.state.database, seed=seed, allowed_context_ids=identity.context_ids
     )
@@ -61,7 +61,7 @@ async def bootstrap(
 async def packet(
     request: Request,
     context_id: str,
-    identity: Annotated[DemoIdentity, Depends(require_context_identity)],
+    identity: Annotated[LocalIdentity, Depends(require_context_identity)],
 ):
     """Legge il contesto richiesto, le sue fonti e il template Campus."""
     return await read_packet(
@@ -88,16 +88,16 @@ def problem(request, status, code, detail):
 def create_app(
     settings: BackendSettings | None = None,
     *,
-    demo_identities: tuple[DemoIdentity, ...] = DEMO_IDENTITIES,
+    identities: tuple[LocalIdentity, ...] | None = None,
 ) -> FastAPI:
     settings = settings or BackendSettings()
-    if (
-        not demo_identities
-        or any(not identity.subject or not identity.token for identity in demo_identities)
-        or len({identity.token for identity in demo_identities}) != len(demo_identities)
-        or len({identity.subject for identity in demo_identities}) != len(demo_identities)
+    if identities is not None and (
+        not identities
+        or any(not identity.subject or not identity.token for identity in identities)
+        or len({identity.token for identity in identities}) != len(identities)
+        or len({identity.subject for identity in identities}) != len(identities)
     ):
-        raise ValueError("Le identità demo richiedono soggetti e token non vuoti e univoci.")
+        raise ValueError("Le identità locali richiedono soggetti e token non vuoti e univoci.")
 
     @asynccontextmanager
     async def lifespan(app):
@@ -111,7 +111,7 @@ def create_app(
         lifespan=lifespan,
         description="Contesti e fonti per la compilazione della lettera di dimissione.",
     )
-    app.state.demo_identities = demo_identities
+    app.state.identities = local_identities() if identities is None else identities
 
     @app.middleware("http")
     async def request_context(request, call_next):
@@ -144,7 +144,7 @@ def create_app(
                     "method": request.method,
                     "route": getattr(request.scope.get("route"), "path", "unmatched"),
                     "status": result.status_code,
-                    "demo_subject": getattr(request.state, "demo_subject", None),
+                    "local_subject": getattr(request.state, "local_subject", None),
                     "duration_ms": round((perf_counter() - start) * 1000, 2),
                 }
             )

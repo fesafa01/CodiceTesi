@@ -8,6 +8,8 @@ from pydantic import Field, model_validator
 from codice_tesi.discharge.contracts import Contract
 from codice_tesi.discharge.template import LetterTemplate, load_template
 
+MIMIC_DATASET = "mimic-iv-hosp"
+
 
 class Context(Contract):
     """Identità verificata dell’episodio oppure nota isolata priva di legami clinici."""

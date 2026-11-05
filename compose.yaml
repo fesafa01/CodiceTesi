@@ -11,10 +11,10 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: var/mimic/access.env
+        required: false
     environment:
       APP_BACKEND_URL: http://backend:8001
-      # Identità pubblica fittizia per il solo prototipo locale su sintetici.
-      APP_BACKEND_TOKEN: ${APP_BACKEND_TOKEN:-demo-revisore}
       TELEMETRY_ENABLED: "true"
       TELEMETRY_ENDPOINT: http://otel-collector:4318
       TELEMETRY_PROJECT: tesi-dimissioni
@@ -36,9 +36,10 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: var/mimic/access.env
+        required: false
     environment:
       APP_BACKEND_URL: http://backend:8001
-      WEB_OUTPUT_DIR: /app/output/dimissioni
       TELEMETRY_ENABLED: "true"
       TELEMETRY_ENDPOINT: http://otel-collector:4318
       TELEMETRY_PROJECT: tesi-dimissioni
@@ -64,10 +65,12 @@ services:
     image: codice-tesi-web:local
     build: ./web
     init: true
+    env_file:
+      - path: var/mimic/access.env
+        required: false
     environment:
       APP_BACKEND_URL: http://backend:8001
       AGENT_API_URL: http://agent-api:8002
-      APP_BACKEND_TOKEN: ${APP_BACKEND_TOKEN:-demo-revisore}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -78,7 +81,7 @@ services:
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     healthcheck:
-      test: ["CMD", "bun", "-e", "const r = await fetch('http://127.0.0.1:3000'); process.exit(r.ok ? 0 : 1)"]
+      test: ["CMD", "bun", "-e", "const token = process.env.APP_MIMIC_TOKEN; const headers = token ? {Authorization: 'Basic ' + btoa('mimic:' + token)} : {}; const r = await fetch('http://127.0.0.1:3000', {headers}); process.exit(r.ok ? 0 : 1)"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -91,8 +94,6 @@ services:
       POSTGRES_USER: clinico
       # Credenziali del database di sviluppo locale.
       POSTGRES_PASSWORD: clinico_sintetico
-    ports:
-      - "127.0.0.1:5433:5432"
     volumes:
       - clinical-db:/var/lib/postgresql/data
       - ./docker/postgres/01-reader.sql:/docker-entrypoint-initdb.d/01-reader.sql:ro
@@ -108,9 +109,7 @@ services:
       context: .
       target: backend
     command: ["init"]
-    volumes:
-      - ../datasets_pubblici/synthea_dimissioni:/dataset:ro
-    environment: &clinical-environment
+    environment:
       CLINICAL_DATABASE_URL: postgresql://clinico:clinico_sintetico@db:5432/clinico
       CLINICAL_HOST: 0.0.0.0
     depends_on:
@@ -127,9 +126,12 @@ services:
       context: .
       target: backend
     init: true
+    env_file:
+      - path: var/mimic/access.env
+        required: false
     environment:
-      <<: *clinical-environment
       CLINICAL_DATABASE_URL: postgresql://clinical_reader:lettura_sintetica@db:5432/clinico
+      CLINICAL_HOST: 0.0.0.0
     ports:
       - "127.0.0.1:8001:8001"
     depends_on:

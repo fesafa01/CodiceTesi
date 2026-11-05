@@ -13,7 +13,6 @@ from uuid import uuid4
 from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.context import PreparedRequest
 from codice_tesi.discharge.models import CompositionPacket
-from codice_tesi.discharge.prompts import PROMPT_VERSION
 from codice_tesi.discharge.provenance import (
     TRACE_SCHEMA_VERSION,
     TraceBinding,
@@ -77,7 +76,7 @@ class RunArtifacts:
                 "sha256": packet.template.sha256,
             },
             "schema_pacchetto": packet.schema_version,
-            "prompt_version": PROMPT_VERSION,
+            "prompt_version": request.prompt_version,
             "config_modello": config.model_dump(mode="json"),
             "modalita": "anteprima" if preview else "generazione",
             "richieste_llm_previste": config.max_requests if config.tools_enabled else 1,

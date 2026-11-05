@@ -1,40 +1,32 @@
 # Verifica della sovranità nel prototipo locale
 
-Il prototipo produce una bozza da fonti documentali, con inferenza sullo Spark e revisione affidata al medico. Qui sono definiti i controlli tecnici, le prove e i limiti del perimetro locale. Identità e politica di conservazione sono dimostrative; i collaudi usano materiale sintetico provvisorio. Non si attribuisce a questi dati il ruolo di dataset della valutazione clinica.
+Il prototipo produce una bozza da fonti documentali, con inferenza sullo Spark e revisione affidata al medico. Qui sono definiti i controlli tecnici, le prove e i limiti del perimetro locale. Il pilota usa MIMIC-IV. I controlli di accesso e conservazione sono esercitati con fixture autonome.
 
 ## Requisiti e stato
 
 | Requisito | Presente e verificabile | Prova | Che cosa resta aperto |
 |---|---|---|---|
-| Controllo dei dati | Contesto e hash delle fonti validati, ruolo DB di lettura, accessi demo, scadenze su copie censite. | **D1:** integrità/perimetro/log. **D2:** accessi e ciclo di vita. | Inventario completo di copie, cache, log e backup del serving e dei servizi attivi. |
+| Controllo dei dati | Contesto e hash delle fonti validati, ruolo DB di lettura, accessi locali, scadenze su copie censite. | **D1:** integrità/perimetro/log. **D2:** accessi e ciclo di vita. | Inventario completo di copie, cache, log e backup del serving e dei servizi attivi. |
 | Autonomia in esercizio | Servizi locali e collegamento allo Spark configurati. | **A1:** avvio, inferenza e riavvio con uscita esterna bloccata su entrambi gli host. | Prova di rete completa; endpoint locali e dry-run non dimostrano autonomia offline. |
 | Identità e ripristino | Lock Python, hash di codice e richieste, metadati delle esecuzioni. | **R1:** ricostruzione isolata da un archivio interno. | Manifest effettivo di pesi/tokenizer/runtime, licenze, immagini e ripristino completo. |
 | Qualità documentale | Template, controlli delle intestazioni/istologico e del budget. | **Q1:** invarianti su sintetici, copertura e affermazioni supportate. | Annotazioni semantiche e valutazione clinica; il formato valido non prova correttezza. |
 | Contenimento | Tool opzionali di sola lettura sullo snapshot; parziali e fallimenti conservati. | **C1:** contratti/privilegi e isolamento dei tool. **C2:** istruzioni spurie e arresto del serving. | Prove sul modello e conferma del rilascio delle risorse sullo Spark. |
 | Portabilità | Endpoint e modello configurabili; contratto comune. | **P1:** sostituzione controllata e nuova valutazione. | Secondo checkpoint/runtime, flag adattati e confronto di qualità/costo. |
-| Sostenibilità | Registro di tempi, usage quando disponibile e fallimenti. | **S1:** carico/risorse. **S2:** indisponibilità/recupero. | Misure hardware e prove di servizio reale, oltre ai mock. |
+| Sostenibilità | Registro di tempi, usage quando disponibile e fallimenti. | **S1:** carico/risorse. **S2:** indisponibilità/recupero. | Metodo di misura delle risorse e dei consumi da definire. Prove di carico e recupero sul servizio reale. |
 
 Gli esiti delle singole prove sono `SUPERATA`, `NON_SUPERATA`, `PARZIALE`, `NON_ESEGUITA` o `NON_VALUTABILE`. Un test con risposte simulate non attesta il comportamento del modello o dell'infrastruttura reale. Le [verifiche effettuate](verifiche-sovranita.md) distinguono i risultati osservati da questi obiettivi.
 
-## Accessi fittizi
+## Accesso locale
 
-Tutti gli endpoint `/api/v1/compilazione/*`, incluso il template, richiedono un Bearer token di prova. Gli healthcheck restano pubblici sul servizio locale.
+Gli endpoint `/api/v1/compilazione/*` richiedono una credenziale privata,
+generata durante l'importazione MIMIC. Gli healthcheck restano pubblici sul
+servizio locale. Credenziali assenti o invalide ricevono **401** con challenge
+Bearer. Un contesto fuori assegnazione riceve **403** prima che il backend
+ne verifichi l'esistenza. La selezione casuale filtra i candidati in SQL.
+Il backend registra il soggetto autenticato e omette il token da log e artefatti.
 
-| Identità | Token pubblico | Assegnazione |
-|---|---|---|
-| Medico A | `demo-medico-a` | Casi sintetici dispari |
-| Medico B | `demo-medico-b` | Casi sintetici pari |
-| Revisore | `demo-revisore` | Tutti i casi predisposti nella demo |
-
-Credenziali assenti o invalide ricevono **401** con challenge Bearer. Un contesto fuori assegnazione riceve **403**, prima di interrogarne l'esistenza. Il selettore casuale filtra i candidati in SQL e non ripiega su casi altrui. Il client usa per default il revisore; `APP_BACKEND_TOKEN` cambia il profilo. I token non vengono salvati in richieste, registri o tracce; il log backend registra il soggetto fittizio autenticato.
-
-```bash
-# Dalla cartella del repository, con backend e dati sintetici già disponibili.
-PYTHONPATH=src .venv/bin/python scripts/verify_local_access.py \
-  --output output/verifiche/nuova-sessione/accessi.json
-```
-
-Il verificatore definisce gli esiti attesi separatamente dalla mappa del backend: richieste anonime/invalide, casi consentiti/negati e selezione con più seed. I token sono intenzionalmente noti: la prova verifica l'applicazione della policy alla credenziale presentata, non l'identità di una persona reale. Non è previsto un servizio di identità esterno.
+I test di accesso usano identità e casi fittizi iniettati nel processo di test.
+Il [registro storico](verifiche-sovranita.md) conserva la prova precedente.
 
 ## Conservazione e cancellazione dimostrative
 
@@ -75,7 +67,7 @@ PYTHONPATH=src \
 docker stop tesi-retention-demo
 ```
 
-La prova crea copie derivate di due contesti e un controllo fuori inventario; verifica anteprima, scadenze iniziali/24 ore/7 giorni/30 giorni, ripristino valido/scaduto e idempotenza. Controlla gli hash degli originali e rimuove il proprio schema temporaneo. Richieste, bozze e telemetria sono fixture create per il test; non viene eseguita inferenza.
+La prova crea copie di due contesti fittizi e un controllo fuori inventario. Verifica anteprima, scadenze iniziali/24 ore/7 giorni/30 giorni, ripristino valido/scaduto e idempotenza. Al termine rimuove il proprio schema temporaneo. Richieste, bozze e telemetria sono fixture create per il test; non viene eseguita inferenza.
 
 La cancellazione osservata è **logica**, non sovrascrittura fisica di SSD, WAL o snapshot. Non esiste una transazione unica fra DB e filesystem: un errore può lasciare uno stato parziale da controllare. Gli archivi ordinari e i servizi attivi non vengono ripuliti. Prometheus mantiene la retention configurata di 90 giorni; Phoenix, coda del Collector, log Docker e serving richiedono regole proprie. D2 sull'intero ambiente rimane quindi parziale.
 
@@ -87,7 +79,7 @@ La cancellazione osservata è **logica**, non sovrascrittura fisica di SSD, WAL 
 - **Q1:** annotare prima degli output fatti, fonte e tempo; affiancare al formato copertura, negazioni e affermazioni non supportate. Separare lacune delle fonti, errori di estrazione e di generazione. Tenere sviluppo e test separati; soglie cliniche da concordare con i medici.
 - **C2:** preparare note pulite/manipolate in un backend separato, con hash coerenti; confrontare rispetto del compito e connessioni. Interrompere una generazione e osservare anche l'arresto sullo Spark: il solo parziale client non basta.
 - **P1:** ripetere gli stessi casi su un'alternativa locale, documentando flag e adattamenti. Distinguere cambio di modello e motore; la compatibilità HTTP non garantisce qualità equivalente.
-- **S1/S2:** identificare riscaldamento e cache, misurare carico e risorse sullo Spark, includere fallimenti nel denominatore. Provare l'indisponibilità di una componente per volta in istanza separata e registrare recupero e qualità residua.
+- **S1/S2:** identificare riscaldamento e cache, misurare tempi, token disponibili e completamenti sotto carico, includendo i fallimenti nel denominatore. Definire separatamente il metodo per le misure di risorse, potenza ed energia. Provare l'indisponibilità di una componente per volta in istanza separata e registrare recupero e qualità residua.
 
 Per ogni prova conservare versione del protocollo, operatore, tempi UTC, ambiente (mock/backend/Spark), configurazione e hash, casi/ripetizioni, procedura, criterio fissato prima della prova, osservazioni, stato, run ID e limiti. I campi sconosciuti restano `null`/`unknown`. La qualità tecnica non sostituisce la valutazione clinica.
 

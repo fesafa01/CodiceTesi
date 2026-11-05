@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from codice_tesi import application
-from codice_tesi.demo_access import DemoIdentity
+from codice_tesi.access import LocalIdentity
 from codice_tesi.web_api.app import create_app
 
 
@@ -23,11 +23,10 @@ def web_client(tmp_path, packet_factory, monkeypatch):
 
     monkeypatch.setattr("codice_tesi.web_api.app.PacketClient.fetch", fetch)
     monkeypatch.setenv("TELEMETRY_ENABLED", "false")
-    monkeypatch.setenv("HARDWARE_ENABLED", "false")
     app = create_app(output_dir=tmp_path, backend_url="http://test")
-    app.state.demo_identities = (
-        DemoIdentity("test", "demo-test", frozenset({packet.context.id})),
-        DemoIdentity("other", "demo-other", frozenset({"other"})),
+    app.state.identities = (
+        LocalIdentity("test", "demo-test", frozenset({packet.context.id})),
+        LocalIdentity("other", "demo-other", frozenset({"other"})),
     )
     with TestClient(app, headers={"Authorization": "Bearer demo-test"}) as client:
         yield client, calls, packet
@@ -154,7 +153,7 @@ def test_restart_preserves_snapshot_and_marks_running_as_interrupted(tmp_path, w
     state["status"] = "running"
     state_file.write_text(json.dumps(state))
     app = create_app(output_dir=tmp_path)
-    app.state.demo_identities = client.app.state.demo_identities
+    app.state.identities = client.app.state.identities
     with TestClient(app, headers={"Authorization": "Bearer demo-test"}) as restarted:
         assert restarted.get(path + "/stato").json()["status"] == "interrupted"
         assert restarted.get(path).json()["packet"]["context"]["id"] == "episode-x"
@@ -301,7 +300,7 @@ def test_manual_sections_are_saved_with_conflict_detection_and_survive_restart(
     assert client.get(path).json()["editor"]["sections"] == body["sections"]
     assert client.get(path).json()["packet"] == original
     app = create_app(output_dir=tmp_path)
-    app.state.demo_identities = client.app.state.demo_identities
+    app.state.identities = client.app.state.identities
     with TestClient(app, headers={"Authorization": "Bearer demo-test"}) as restarted:
         assert restarted.get(path).json()["editor"] == saved.json()
         # Una stringa vuota è una modifica intenzionale; una chiave omessa la rimuove.

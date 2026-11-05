@@ -4,11 +4,12 @@ import json
 from dataclasses import dataclass
 
 from codice_tesi.discharge.facts import FactInventory
-from codice_tesi.discharge.models import CompositionPacket
+from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
 from codice_tesi.discharge.provenance import EvidenceCatalog, build_catalog
 from codice_tesi.discharge.template import LetterTemplate
 
 PROMPT_VERSION = "campus-stesura-v21-prefisso-stabile"
+MIMIC_PROMPT_VERSION = "campus-mimic-v3"
 
 INSTRUCTIONS = """# Priorità operative
 Applica queste priorità nell'ordine:
@@ -119,6 +120,59 @@ Un No esplicitamente documentato richiede invece la relativa evidenza. Se segnal
 una discordanza, cita entrambe le fonti. Le citazioni propongono un supporto
 documentale: non dichiarare che il testo sia clinicamente validato.
 """
+
+MIMIC_GUIDE = """# Guida alle fonti MIMIC-IV
+Il pacchetto contiene un estratto della degenza con record strutturati e, se
+disponibili, referti radiologici. La lettera originale è riservata al confronto.
+Usa l'origine di ciascuna fonte per decidere che cosa il passaggio attesta.
+
+- In hosp/admissions, admission_type e admission_location sono dati amministrativi.
+  Per il motivo clinico del ricovero serve una fonte che lo dichiari. Usa la data
+  di dimissione registrata come data effettiva nel dataset. Le date sono traslate.
+  In hosp/patients, anchor_age è riferita ad anchor_year e non dà la data di nascita.
+- Quando presente, ed/triage può documentare il motivo d'accesso e i parametri
+  iniziali. Le diagnosi ED appartengono a quella fase del percorso. ed/medrecon
+  descrive i farmaci riferiti all'ingresso ed ed/pyxis registra un prelievo
+  dal dispensatore. Mantieni distinte queste fonti dalla terapia finale.
+- Le fonti icu/ descrivono permanenze e registrazioni di terapia intensiva.
+  Conserva tempi, valori, unità e stato delle procedure e delle infusioni.
+  Le righe ingredientevents descrivono i componenti di un'infusione. Evita
+  di sommarle agli inputevents come se fossero somministrazioni aggiuntive.
+  Le misure durante la permanenza descrivono il decorso ICU.
+- In Condizione clinica alla dimissione, riporta discharge_location come destinazione
+  amministrativa. Se è l'unico dato disponibile, riporta la destinazione e segnala
+  che lo stato clinico alla dimissione non è documentato. Non dedurre stabilità,
+  autonomia o guarigione dalla destinazione.
+- In hosp/prescriptions, gli ordini in degenza non attestano somministrazioni
+  o terapia finale, anche se prossimi all'uscita. In hosp/emar, conserva lo
+  stato dell'evento (event_txt): una dose programmata, ritardata o non data
+  non attesta una somministrazione.
+- La fonte «pharmacy + hosp/prescriptions (Discharge Med)» contiene soltanto
+  ordini esplicitamente marcati per la dimissione, attivi e verificati entro
+  l'uscita. Puoi riportarli nella terapia in dimissione come ordini documentati.
+  Mantieni le lacune di dose, via, frequenza o durata e non presentare gli ordini
+  disponibili come un elenco completo. Per il follow-up serve un piano esplicito.
+- I codici di hosp/diagnoses_icd e hosp/procedures_icd sono codifica amministrativa
+  retrospettiva. Usali solo nei rispettivi campi codificati, indicandone l'origine
+  amministrativa. La descrizione di un codice diagnostico non attesta una
+  diagnosi clinica di dimissione. Un codice procedurale, da solo, non attesta
+  l'esito o l'indicazione clinica della procedura.
+- HCPCS è codifica amministrativa di prestazioni, DRG è un raggruppamento
+  amministrativo. Gli ordini POE documentano richiesta, stato o annullamento.
+  Per affermare che una prestazione è stata eseguita serve evidenza specifica.
+- In hosp/labevents, riporta valore, unità e data. Nella sezione laboratorio
+  usa l'ultimo valore disponibile per esame. Nell'epicrisi puoi confrontare
+  misure datate dello stesso item, campione e unità senza giudizi clinici.
+  In microbiologia mantieni associati campione, test, organismo e sensibilità.
+- Una biopsia senza esito documentato non dimostra che l'istologico sia in attesa
+  né che sia concluso. Senza uno stato esplicito alla dimissione, usa la formula
+  del dato mancante nel campo binario e lascia vuote le informazioni sull'istologico.
+"""
+
+MIMIC_CODE_SOURCES = {
+    "diagnosi_codificate": "hosp/diagnoses_icd",
+    "procedure_codificate": "hosp/procedures_icd oppure hosp/hcpcsevents",
+}
 
 
 @dataclass(frozen=True)
@@ -277,11 +331,35 @@ def _text_rule(instruction: str) -> str:
     )
 
 
-def build_instructions(template: LetterTemplate) -> str:
+def build_instructions(template: LetterTemplate, *, dataset: str | None = None) -> str:
     """Combina priorità e guide per sezione conservando requisiti e titoli canonici."""
-    lines = [INSTRUCTIONS, "# CAMPI CAMPUS DA REDIGERE IN ORDINE"]
+    mimic = dataset == MIMIC_DATASET
+    lines = [INSTRUCTIONS]
+    if mimic:
+        lines.append(MIMIC_GUIDE)
+    lines.append("# CAMPI CAMPUS DA REDIGERE IN ORDINE")
     for index, section in enumerate(template.sections, 1):
         guidance = SECTION_GUIDANCE[section.id]
+        content = _text_rule(section.instruction)
+        if mimic and section.id in MIMIC_CODE_SOURCES:
+            guidance = SectionGuidance(
+                "Riportare la codifica amministrativa del ricovero.",
+                "Una riga per codice, con la dicitura «codifica amministrativa del ricovero», "
+                "il sistema e la versione se dichiarata, e la descrizione disponibile.",
+                "Inventare o convertire codici, o presentarli come conclusioni cliniche.",
+            )
+            content = (
+                f"Trascrivi i codici letterali da {MIMIC_CODE_SOURCES[section.id]} per questa "
+                "degenza, citando il passaggio che contiene il codice e il sistema."
+            )
+        elif mimic and section.id == "decorso":
+            guidance = SectionGuidance(
+                guidance.purpose,
+                "Scrivi una sintesi anche di una sola frase quando le evidenze sono sparse. "
+                "Collega in ordine verificabile solo gli eventi attestati. Distingui "
+                "trasferimenti, referti e ordini dalle decisioni cliniche documentate.",
+                guidance.avoid,
+            )
         lines.extend(
             [
                 f"{index}. {section.title}",
@@ -295,7 +373,7 @@ def build_instructions(template: LetterTemplate) -> str:
                 + ".",
                 f"ID canonico: {section.id}",
                 "Scopo: " + guidance.purpose,
-                "Contenuto: " + _text_rule(section.instruction),
+                "Contenuto: " + content,
                 "Dati da utilizzare, se disponibili: "
                 + "; ".join(f.label for f in section.fields)
                 + ".",
@@ -331,11 +409,9 @@ def build_prompt(
         "Le evidenze sono passaggi originali, con offset Unicode nel testo della fonte.",
     ]
     for source in catalog.sources:
-        lines.extend(
-            [
-                f"INIZIO NOTA {source.id} (tipo: {source.kind})",
-            ]
-        )
+        lines.append(f"INIZIO NOTA {source.id} (tipo: {source.kind})")
+        if packet.context.dataset == MIMIC_DATASET:
+            lines.append("Origine: " + json.dumps(source.origin, ensure_ascii=False))
         for evidence in catalog.evidences:
             if evidence.source_id == source.id:
                 lines.extend(

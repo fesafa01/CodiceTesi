@@ -71,8 +71,8 @@ Dalla cartella `CodiceTesi`:
 docker compose up -d --wait phoenix-db phoenix otel-collector prometheus
 docker compose build app
 
-# Backend e dataset già inizializzati:
-docker compose run --rm app dimissione --contesto synthea-caso-02 --thinking \
+# Backend e campione già inizializzati:
+docker compose run --rm app dimissione --seed 42 --dry-run --no-telemetry \
   --experiment-file /app/experiments/exploratory.example.json
 ```
 
@@ -87,8 +87,9 @@ Per l'esecuzione Python sul Mac:
 # Eseguito già durante l'integrazione; non sovrascrivere una configurazione personale.
 cp -n observability/.env.example observability/.env
 uv sync --locked --extra backend --no-editable
+set -a; source var/mimic/access.env; set +a
 uv run --locked --no-editable python main.py dimissione \
-  --contesto synthea-caso-02 --thinking \
+  --seed 42 --dry-run --no-telemetry \
   --experiment-file experiments/exploratory.example.json
 ```
 

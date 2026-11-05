@@ -5,8 +5,14 @@ from dataclasses import dataclass
 from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.facts import FactInventory, extract_facts
-from codice_tesi.discharge.models import CompositionPacket
-from codice_tesi.discharge.prompts import build_instructions, build_prompt, with_read_tools
+from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
+from codice_tesi.discharge.prompts import (
+    MIMIC_PROMPT_VERSION,
+    PROMPT_VERSION,
+    build_instructions,
+    build_prompt,
+    with_read_tools,
+)
 from codice_tesi.discharge.provenance import EvidenceCatalog, build_catalog
 from codice_tesi.discharge.token_count import estimate_input_tokens, input_token_breakdown
 
@@ -15,6 +21,7 @@ from codice_tesi.discharge.token_count import estimate_input_tokens, input_token
 class PreparedRequest:
     instructions: str
     prompt: str
+    prompt_version: str
     catalog: EvidenceCatalog
     input_tokens_estimate: int
     input_estimate_method: str
@@ -39,7 +46,8 @@ def prepare_request(
         raise ValueError("Il catalogo preparato non corrisponde alle fonti del pacchetto.")
     model_config = model_config or ModelConfig()
     facts = extract_facts(catalog)
-    instructions = build_instructions(packet.template)
+    dataset = packet.context.dataset
+    instructions = build_instructions(packet.template, dataset=dataset)
     prompt = build_prompt(packet, catalog, facts)
     if model_config.tools_enabled:
         instructions = with_read_tools(instructions)
@@ -58,6 +66,7 @@ def prepare_request(
     return PreparedRequest(
         instructions=instructions,
         prompt=prompt,
+        prompt_version=MIMIC_PROMPT_VERSION if dataset == MIMIC_DATASET else PROMPT_VERSION,
         catalog=catalog,
         input_tokens_estimate=estimate,
         input_estimate_method=token_estimate.method,

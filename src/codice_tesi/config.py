@@ -4,6 +4,8 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
 from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+SPARK_LLM_URL = "http://spark-413e.tail9c981a.ts.net:8000/v1"
+
 
 class ModelConfig(BaseModel):
     """Redazione in streaming; max_tokens comprende anche l'eventuale ragionamento."""
@@ -54,6 +56,6 @@ class Settings(BaseSettings):
         env_prefix="LLM_", env_file=".env", env_file_encoding="utf-8", extra="forbid"
     )
 
-    base_url: AnyHttpUrl = AnyHttpUrl("http://spark-413e.tail9c981a.ts.net:8000/v1")
+    base_url: AnyHttpUrl = AnyHttpUrl(SPARK_LLM_URL)
     api_key: SecretStr = Field(default=SecretStr("not-required"), min_length=1)
     timeout: float = Field(default=300, gt=0)
