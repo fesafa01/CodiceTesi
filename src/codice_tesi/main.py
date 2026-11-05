@@ -53,12 +53,6 @@ def main(argv: list[str] | None = None) -> None:
         help="Abilita/disabilita OTLP; configurazione in observability/.env o TELEMETRY_*.",
     )
     discharge.add_argument(
-        "--hardware",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Raccoglie i sensori Spark; configurazione in observability/hardware.env.",
-    )
-    discharge.add_argument(
         "--dry-run",
         action="store_true",
         help="Salva la richiesta completa senza chiamare il modello.",
@@ -109,7 +103,6 @@ def main(argv: list[str] | None = None) -> None:
             from codice_tesi.application import run_application
             from codice_tesi.discharge.config import ContextConfig
             from codice_tesi.observability.execution import ExperimentConfig
-            from codice_tesi.observability.hardware import HardwareConfig
             from codice_tesi.observability.telemetry import TelemetryConfig
 
             config = ModelConfig()
@@ -127,9 +120,6 @@ def main(argv: list[str] | None = None) -> None:
             telemetry_config = TelemetryConfig()
             if args.telemetry is not None:
                 telemetry_config.enabled = args.telemetry
-            hardware_config = HardwareConfig()
-            if args.hardware is not None:
-                hardware_config.enabled = args.hardware
             asyncio.run(
                 run_application(
                     backend_url=args.backend_url,
@@ -141,7 +131,6 @@ def main(argv: list[str] | None = None) -> None:
                     context_config=ContextConfig(window_tokens=args.context_window),
                     experiment=experiment,
                     telemetry_config=telemetry_config,
-                    hardware_config=hardware_config,
                 )
             )
             return

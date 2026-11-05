@@ -214,7 +214,6 @@ tempCodeRunnerFile.py
 /output/
 /verifiche/
 /observability/.env
-/observability/hardware.env
 
 # PyPI configuration file
 .pypirc

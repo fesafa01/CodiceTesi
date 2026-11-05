@@ -126,7 +126,6 @@ def test_failed_or_cancelled_request_span_is_closed_without_content(
     telemetry = Telemetry(TelemetryConfig(enabled=False, _env_file=None))
     telemetry.tracer = provider.get_tracer("request-failure-test")
     monkeypatch.setattr(application, "Telemetry", lambda _: telemetry)
-    monkeypatch.setenv("HARDWARE_ENABLED", "false")
 
     async def check():
         entered = asyncio.Event()

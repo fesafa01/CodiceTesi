@@ -274,7 +274,6 @@ def test_real_client_tool_roundtrip_omits_narration_and_aggregates_usage(
 
     monkeypatch.setattr(api, "create_client", client)
     monkeypatch.setenv("TELEMETRY_ENABLED", "false")
-    monkeypatch.setenv("HARDWARE_ENABLED", "false")
     run = application.run_application(
         backend_url="http://test",
         output_dir=tmp_path,
@@ -449,7 +448,6 @@ def test_large_context_reserves_the_next_response_for_final_text(
         lambda *a, **kw: SimpleNamespace(tokens=40000),
     )
     monkeypatch.setenv("TELEMETRY_ENABLED", "false")
-    monkeypatch.setenv("HARDWARE_ENABLED", "false")
     directory = asyncio.run(
         application.run_application(
             backend_url="http://test",
@@ -560,7 +558,6 @@ def test_invalid_tool_arguments_are_corrected_once_and_audited_without_content(
         )
 
     monkeypatch.setattr(api, "create_client", client)
-    monkeypatch.setenv("HARDWARE_ENABLED", "false")
     run = application.run_application(
         backend_url="http://test",
         output_dir=tmp_path,
@@ -648,7 +645,6 @@ def test_application_deadline_includes_packet_fetch_and_records_failure(monkeypa
 
     monkeypatch.setattr(application.PacketClient, "fetch", fetch)
     monkeypatch.setenv("TELEMETRY_ENABLED", "false")
-    monkeypatch.setenv("HARDWARE_ENABLED", "false")
     with pytest.raises(ExecutionTimeoutError):
         asyncio.run(
             application.run_application(
@@ -762,7 +758,6 @@ def test_final_phase_keeps_prefix_and_blocks_more_reads_without_model_retry(
 
     monkeypatch.setattr(api, "create_client", client)
     monkeypatch.setenv("TELEMETRY_ENABLED", "false")
-    monkeypatch.setenv("HARDWARE_ENABLED", "false")
     with pytest.raises(FinalPhaseToolCallError):
         asyncio.run(
             application.run_application(

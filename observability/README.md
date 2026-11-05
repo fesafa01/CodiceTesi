@@ -14,15 +14,11 @@ observability/
   prometheus.yaml    # Scrape delle metriche
   .env.example       # Configurazione pubblica per il client sul Mac
   .env               # Configurazione locale esclusa da Git e immagini
-  hardware.env.example # Configurazione della sonda Spark, separata da OTLP
-  HARDWARE.md        # Sensori, attivazione sullo Spark e limiti di attribuzione
   README.md          # Uso, definizioni delle misure e limiti
 src/codice_tesi/observability/
   execution.py       # Registro atomico, manifest ed esportazione CSV/JSONL
   stream_metrics.py  # Osservazioni dello stream, senza conservarne i testi
   telemetry.py       # Configurazione ed export OpenTelemetry
-  hardware.py        # Campioni remoti e riepilogo per richiesta LLM
-  hardware_probe.py  # Sonda Linux autonoma da eseguire sullo Spark
 tests/observability/ # Test del registro, delle misure e dell'isolamento dei dati
 ```
 
@@ -32,13 +28,6 @@ restano quelli esistenti. Non avviare il Compose incluso come progetto separato.
 Sono richiesti Docker Compose con supporto a `include` (2.20.0 o successivo).
 L'applicazione mantiene soltanto i collegamenti al Collector e ai moduli Python.
 Il registro resta disponibile anche quando l'export è disabilitato.
-
-La raccolta delle risorse dello Spark usa una sonda separata, ancora da attivare
-sulla macchina remota. Il campo `hardware` del registro e gli attributi Phoenix
-distinguono misure disponibili, parziali e assenti. Vedere [hardware Spark](HARDWARE.md)
-per lo stato della verifica e i passaggi da eseguire sullo Spark. Il perimetro
-essenziale comprende CPU, memoria condivisa, swap, disco, utilizzo/temperatura/clock
-grafico GPU; esclude framebuffer dedicato, potenza, energia e costi.
 
 ## Architettura
 
@@ -50,8 +39,6 @@ flowchart LR
     PX --> PDB[(PostgreSQL dedicato)]
     COL -->|Metriche aggregate| EXP[Endpoint Prometheus interno]
     PROM[Prometheus] -->|scrape ogni 5 s| EXP
-    PROM -->|scrape ogni 5 s, quando attiva| HW[Sonda hardware Spark]
-    APP -->|snapshot durante la richiesta LLM| HW
 ```
 
 Servizi definiti in `observability/compose.yaml`, incluso dal Compose principale:
@@ -140,7 +127,7 @@ Il record contiene:
 - configurazione richiesta, hash del codice installato, versioni dei pacchetti;
 - hash del pacchetto completo e della richiesta, versioni di dataset, prompt e
   template, quantità di fonti, configurazione del contesto e hash della bozza;
-- tempi delle fasi e misure dello stream, consumi disponibili e qualità dei contatori;
+- tempi delle fasi e misure dello stream, conteggi di token disponibili e qualità dei contatori;
 - identificativi della trace, percorso degli artefatti e risultato del flush SDK.
 
 Checkpoint, tokenizer, quantizzazione, runtime, hardware di inferenza, cache,
@@ -217,8 +204,8 @@ adattatore dedicato; le incongruenze rilevate sono in `usage_issues`.
 Queste misure comprendono effetti di rete e consumo dello stream da parte del
 client, inclusi flush del file e stampa. La velocità client non è la velocità pura
 di decode del motore. Coda, prefill e TTFT server richiedono osservazioni del
-serving attualmente non attestate. La sonda hardware raccoglie risorse dell’host;
-non misura memoria esclusiva del modello, potenza o energia.
+serving attualmente non attestate. La misurazione di potenza ed energia
+richiede un metodo dedicato ancora da definire.
 Token/s e budget di token vanno interpretati insieme a tokenizer, configurazione,
 lunghezza della risposta e qualità, senza equiparare tokenizer diversi.
 

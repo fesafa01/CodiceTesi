@@ -19,18 +19,16 @@ from codice_tesi.discharge.limits import execution_deadline
 from codice_tesi.discharge.models import CompositionPacket
 from codice_tesi.discharge.provenance import EvidenceCatalog
 from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfig
-from codice_tesi.observability.hardware import HardwareConfig, HardwareObservation
 from codice_tesi.observability.model_spans import agent_attributes, prompt_attributes
 from codice_tesi.observability.telemetry import Telemetry, TelemetryConfig
 
 
-async def _record_progress(generator, artifacts, record, hardware, notify):
+async def _record_progress(generator, artifacts, record, notify):
     while True:
         await asyncio.sleep(1)
         progress = dict(generator.progress)
         artifacts.finish("in_corso", usage={"stream": progress})
         record.data["stream_progress"] = progress
-        record.data["hardware"] = hardware.summary()
         record.save()
         notify(generator.progress.get("fase", "generazione"), progress=progress)
 
@@ -49,7 +47,6 @@ async def run_application(
     context_config: ContextConfig | None = None,
     experiment: ExperimentConfig | None = None,
     telemetry_config: TelemetryConfig | None = None,
-    hardware_config: HardwareConfig | None = None,
     on_progress: Callable[[dict], None] | None = None,
     on_text: Callable[[str, bool], None] | None = None,
     catalog: EvidenceCatalog | None = None,
@@ -73,10 +70,6 @@ async def run_application(
         dry_run=dry_run,
     )
     telemetry = Telemetry(telemetry_config)
-    hardware = HardwareObservation(
-        hardware_config or HardwareConfig(), output_dir, record.data["run_id"]
-    )
-    record.data["hardware"] = hardware.summary()
 
     def notify(phase, *, progress=None):
         if on_progress:
@@ -183,7 +176,7 @@ async def run_application(
                                 generator.partial_callback = save_partial
                             artifacts.start()
                             progress_task = asyncio.create_task(
-                                _record_progress(generator, artifacts, record, hardware, notify)
+                                _record_progress(generator, artifacts, record, notify)
                             )
                             try:
                                 with telemetry.stage(record, "generate_draft"):
@@ -192,7 +185,6 @@ async def run_application(
                                         attributes=prompt_attributes(request),
                                     ) as agent_span:
                                         try:
-                                            hardware.start()
                                             async with aclosing(
                                                 generator.stream(request)
                                             ) as chunks:
@@ -206,9 +198,6 @@ async def run_application(
                                                         on_text(chunk, config.tools_enabled)
                                                     emit(chunk, end="", flush=True)
                                         finally:
-                                            await hardware.stop()
-                                            record.data["hardware"] = hardware.summary()
-                                            agent_span.set_attributes(hardware.span_attributes())
                                             metrics = generator.usage.get("metrics", {})
                                             agent_span.set_attributes(
                                                 agent_attributes(
@@ -255,7 +244,6 @@ async def run_application(
                 raise
             finally:
                 root.set_attribute("tesi.status", record.data["status"])
-                root.set_attributes(hardware.span_attributes())
                 telemetry.record_metrics(record)
     finally:
         record.data["telemetry"] = telemetry.close()
