@@ -5,6 +5,7 @@ import logging
 import os
 import re
 from pathlib import Path
+from shutil import copyfile
 from tempfile import TemporaryDirectory
 from time import sleep
 from urllib.error import HTTPError
@@ -15,6 +16,16 @@ from codice_tesi.observability.spark import save_snapshot
 
 PREFIX = "TEST-CASO-MIMIC-"
 SHEET = "scheda.json"
+RUN_FILES = (
+    "richiesta.txt",
+    "catalogo_evidenze.json",
+    "fatti_documentali.json",
+    "risposta.parziale.json",
+    "bozza_strutturata.json",
+    "evidenze.md",
+    "bozza.txt",
+    "esito.json",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +37,7 @@ def archive_run(destination: Path, record_path: Path, record: dict) -> dict:
     output = record_path.parents[1]
     run = record["test_spark"]
     config = record["model_config"]
+    metrics = record["llm"]
     hardware = record.get("spark_monitor", {"status": "not_collected"})
     snapshot = read_json(output / hardware["path"]) if hardware.get("path") else {}
     sheet = {
@@ -37,6 +49,7 @@ def archive_run(destination: Path, record_path: Path, record: dict) -> dict:
         "started_at": record["started_at"],
         "ended_at": record["ended_at"],
         "model": config["model"],
+        "response_model": (metrics or {}).get("response_model"),
         "reasoning_enabled": config["thinking"],
         "reasoning_effort": (
             record["request_settings"].get("openai_reasoning_effort")
@@ -45,23 +58,29 @@ def archive_run(destination: Path, record_path: Path, record: dict) -> dict:
         ),
         "tools_enabled": config["tools_enabled"],
         "draft_file": None,
+        "artifact_files": [],
         "reference": {"status": "pending"},
     }
     with TemporaryDirectory(prefix=".prova-", dir=destination.parent) as staging:
         staging = Path(staging)
         if run["artifact_directory"]:
             artifacts = output / run["artifact_directory"]
-            for name in ("bozza.txt", "risposta.parziale.json"):
+            for name in RUN_FILES:
                 source = artifacts / name
-                if source.is_file() and source.stat().st_size:
-                    (staging / name).write_bytes(source.read_bytes())
+                if source.is_file():
+                    copyfile(source, staging / name)
+                    sheet["artifact_files"].append(name)
+            for name in ("bozza.txt", "risposta.parziale.json"):
+                copied = staging / name
+                if copied.is_file() and copied.stat().st_size:
                     sheet["draft_file"] = name
                     break
+        save_snapshot(staging / "registro.json", record)
         save_snapshot(
             staging / "metriche.json",
             {
                 "run_id": record["run_id"],
-                "token_e_stream": record["llm"],
+                "token_e_stream": metrics,
                 "input_tokens_estimate": record.get("input_tokens_estimate"),
                 "timings": record["timings"],
                 "trace_id": record["trace_id"],

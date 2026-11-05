@@ -38,6 +38,7 @@ i servizi con `docker compose up -d backend agent-api spark-archive web`.
 
 Aprire [l'interfaccia locale](http://127.0.0.1:3000) e accedere con utente
 `mimic` e password `APP_MIMIC_TOKEN` dal file `$TESI_PRIVATE_DIR/var/mimic/access.env`.
+
 Il pairing dei 17 campi, i limiti delle fonti e il comando per confrontare una
 bozza con la relativa lettera sono descritti in [MIMIC e CAMPUS](docs/mimic-campus.md).
 Il [catalogo dei dataset](docs/dataset-mimic.md) include il comando per scaricare ICU.
@@ -66,16 +67,21 @@ delle affermazioni resta da valutare.
 ### Archivio delle prove MIMIC
 
 Lo stack web archivia i nuovi tentativi MIMIC in `$TESI_PRIVATE_DIR/TEST-SPARK/TEST-CASO-MIMIC-1/`,
-`TEST-CASO-MIMIC-2/` e così via. Il numero identifica il tentativo, mentre
-`scheda.json` riporta il ricovero, il modello richiesto, lo stato, il reasoning
-con il livello inviato al server e l'abilitazione dei tool. Ogni cartella contiene:
+`TEST-CASO-MIMIC-2/` e così via. Il numero identifica il tentativo. Ogni cartella
+raccoglie i file disponibili per quella prova.
 
-- `bozza.txt` dopo la validazione, oppure `risposta.parziale.json` se resta testo grezzo.
-- `lettera_ufficiale.txt` con l'originale abbinato alla versione del ricovero.
-  La scheda registra l'identificativo della nota o lo stato del recupero.
-- `metriche.json` con contatori dei token e tempi dello stream dal registro,
-  campioni dello Spark nell'intervallo della prova ed energia per la finestra
-  del monitor. I valori mancanti e gli errori di raccolta sono espliciti.
+- `scheda.json` riporta il ricovero, lo stato, il modello richiesto e quello
+  riportato dallo stream, il livello di reasoning e l’abilitazione dei tool.
+- `registro.json` conserva il record completo con impostazioni del modello,
+  tempi, versioni e hash.
+- `metriche.json` contiene i token e i tempi dello stream, i campioni dello Spark
+  durante la prova e l’energia per la finestra del monitor. La disponibilità
+  dei valori dipende da quanto riportano il serving e il monitor.
+- `richiesta.txt`, `catalogo_evidenze.json`, `fatti_documentali.json`, `esito.json`
+  e `risposta.parziale.json` documentano richiesta, fonti, esito e risposta grezza.
+  Dopo la validazione si aggiungono `bozza.txt`, `bozza_strutturata.json` ed `evidenze.md`.
+- `lettera_ufficiale.txt` contiene l’originale abbinato alla versione del ricovero.
+  La scheda registra l’identificativo della nota o lo stato del recupero.
 
 L'archivio si aggiorna a fine tentativo, anche se fallisce o viene interrotto.
 Il servizio `spark-archive` ritenta il recupero degli originali

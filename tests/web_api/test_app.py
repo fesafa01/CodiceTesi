@@ -482,3 +482,154 @@ def test_agent_api_import_does_not_load_sql_backend_or_driver():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_web_generation_archives_provider_usage_and_all_artifacts(
+    tmp_path, monkeypatch, packet_factory, letter_factory, response_factory
+):
+    from io import StringIO
+
+    import httpx2 as httpx
+    from openai import AsyncOpenAI
+
+    from codice_tesi import api
+    from codice_tesi.discharge.models import MIMIC_DATASET
+    from codice_tesi.observability import spark_archive
+
+    token = "x" * 43
+    root = tmp_path / "output"
+    run_output = root / "dimissioni-mimic"
+    archive = tmp_path / "TEST-SPARK"
+    monkeypatch.setenv("APP_MIMIC_TOKEN", token)
+    monkeypatch.setenv("APP_MIMIC_CONTEXTS", "mimic-1")
+    monkeypatch.setenv("TESI_OUTPUT_DIR", str(root))
+    monkeypatch.delenv("WEB_OUTPUT_DIR", raising=False)
+    monkeypatch.setenv("LLM_MODEL", QWEN_MODEL)
+    monkeypatch.setenv("LLM_OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
+    monkeypatch.setenv("TELEMETRY_ENABLED", "true")
+
+    packet = packet_factory("nota")
+    packet = packet.model_copy(
+        update={
+            "context": packet.context.model_copy(
+                update={"id": "mimic-1", "dataset": MIMIC_DATASET}
+            ),
+            "sources": tuple(
+                s.model_copy(update={"context_id": "mimic-1"}) for s in packet.sources
+            ),
+        }
+    )
+
+    async def fetch(self, **kwargs):
+        assert kwargs["context_id"] == packet.context.id
+        return packet
+
+    draft = response_factory(letter_factory())
+
+    def handle_completion(request):
+        body = json.loads(request.content)
+        assert request.url.path == "/v1/chat/completions"
+        assert body["model"] == QWEN_MODEL and body["reasoning_effort"] == "low"
+        events = [
+            {"choices": [{"index": 0, "delta": {"content": draft}, "finish_reason": "stop"}]},
+            {
+                "choices": [],
+                "usage": {"prompt_tokens": 42, "completion_tokens": 12, "total_tokens": 54},
+            },
+        ]
+        stream = "".join(
+            "data: "
+            + json.dumps(
+                {
+                    "id": "fixture-stream",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "fixture-model-revision",
+                    **event,
+                }
+            )
+            + "\n\n"
+            for event in events
+        )
+        return httpx.Response(
+            200,
+            content=stream + "data: [DONE]\n\n",
+            headers={"Content-Type": "text/event-stream"},
+        )
+
+    def create_client(settings):
+        return AsyncOpenAI(
+            base_url=str(settings.base_url),
+            api_key="fixture",
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle_completion)),
+        )
+
+    monkeypatch.setattr("codice_tesi.web_api.app.PacketClient.fetch", fetch)
+    monkeypatch.setattr(api, "create_client", create_client)
+    with TestClient(
+        create_app(backend_url="http://test"),
+        headers={"Authorization": f"Bearer {token}"},
+    ) as client:
+        prepared = client.post("/api/v1/preparazioni", json={"context_id": packet.context.id})
+        assert prepared.status_code == 201
+        path = f"/api/v1/preparazioni/{prepared.json()['id']}"
+        assert client.post(path + "/genera").status_code == 202
+        state = wait_result(client, path)
+        assert state["status"] == "completed", state
+
+    record_path = run_output / "registro" / f"{state['run_id']}.json"
+    record = json.loads(record_path.read_text())
+    artifacts = run_output / record["test_spark"]["artifact_directory"]
+
+    class EndScan(Exception):
+        pass
+
+    def end_scan(_):
+        raise EndScan
+
+    def get_reference(request, *, timeout):
+        assert request.full_url == (
+            "http://reference/api/v1/revisione/contesti/mimic-1/lettera-originale?versione=1"
+        )
+        return StringIO(json.dumps({"note_id": "fixture-note", "text": "Originale sintetico"}))
+
+    monkeypatch.setattr(spark_archive, "sleep", end_scan)
+    monkeypatch.setattr(spark_archive, "urlopen", get_reference)
+    with pytest.raises(EndScan):
+        spark_archive.run_worker(archive, root, base_url="http://reference", token=token)
+
+    case = archive / "TEST-CASO-MIMIC-1"
+    files = {
+        "richiesta.txt",
+        "catalogo_evidenze.json",
+        "fatti_documentali.json",
+        "risposta.parziale.json",
+        "bozza_strutturata.json",
+        "evidenze.md",
+        "bozza.txt",
+        "esito.json",
+    }
+    sheet = json.loads((case / "scheda.json").read_text())
+    assert set(sheet["artifact_files"]) == files
+    assert sheet["run_id"] == state["run_id"]
+    assert sheet["model"] == QWEN_MODEL and sheet["response_model"] == "fixture-model-revision"
+    assert sheet["reasoning_effort"] == "low" and sheet["tools_enabled"] is False
+    assert sheet["draft_file"] == "bozza.txt"
+    assert sheet["reference"]["status"] == "saved"
+    assert set(p.name for p in case.iterdir()) == files | {
+        "scheda.json",
+        "registro.json",
+        "metriche.json",
+        "lettera_ufficiale.txt",
+    }
+    for name in files:
+        assert (case / name).read_bytes() == (artifacts / name).read_bytes()
+    assert (case / "lettera_ufficiale.txt").read_text() == "Originale sintetico"
+    assert json.loads((case / "registro.json").read_text()) == record
+    metrics = json.loads((case / "metriche.json").read_text())
+    assert metrics["token_e_stream"] == record["llm"]
+    assert metrics["token_e_stream"]["input_tokens"] == 42
+    assert metrics["token_e_stream"]["output_tokens"] == 12
+    assert metrics["token_e_stream"]["usage_complete"] is True
+    assert metrics["telemetry"]["enabled"] is False
