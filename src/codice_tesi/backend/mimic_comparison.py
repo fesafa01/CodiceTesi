@@ -73,6 +73,19 @@ async def profile_mimic(database: Database) -> None:
             print(f"{header}: {count}/{len(notes)}")
 
 
+async def read_reference_notes(database: Database, context_id: str, version: str) -> list[dict]:
+    async with database.connection(read_only=True) as connection:
+        cursor = await connection.execute(
+            "SELECT r.notes FROM mimic_discharge_references r "
+            "JOIN composition_contexts c ON c.id = r.context_id "
+            "WHERE c.id = %s AND c.payload->>'dataset' = %s "
+            "AND c.payload->>'dataset_version' = %s",
+            (context_id, MIMIC_DATASET, version),
+        )
+        row = await cursor.fetchone()
+    return row["notes"] if row else []
+
+
 async def compare_mimic(database: Database, draft_path: Path, destination: Path) -> None:
     draft = TraceResult.model_validate_json(draft_path.read_bytes())
     binding = draft.binding
@@ -85,19 +98,10 @@ async def compare_mimic(database: Database, draft_path: Path, destination: Path)
     ):
         raise ValueError("Serve una bozza MIMIC validata con il template Campus corrente.")
 
-    async with database.connection(read_only=True) as connection:
-        cursor = await connection.execute(
-            "SELECT r.notes FROM mimic_discharge_references r "
-            "JOIN composition_contexts c ON c.id = r.context_id "
-            "WHERE c.id = %s AND c.payload->>'dataset' = %s "
-            "AND c.payload->>'dataset_version' = %s",
-            (binding.context_id, binding.dataset.id, binding.dataset.version),
-        )
-        row = await cursor.fetchone()
-    if row is None:
+    notes = await read_reference_notes(database, binding.context_id, binding.dataset.version)
+    if not notes:
         raise ValueError("Nessun originale per il ricovero e la versione di questa bozza.")
 
-    notes = row["notes"]
     note = notes[-1]
     headers = mapped_headers(note["text"])
     checklist = "\n".join(

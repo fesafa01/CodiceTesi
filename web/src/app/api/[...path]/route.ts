@@ -42,13 +42,16 @@ async function proxy(request: NextRequest, path: string[]) {
 	const route = path.join("/");
 	const backend = process.env.APP_BACKEND_URL ?? "http://127.0.0.1:8001";
 	const agent = process.env.AGENT_API_URL ?? "http://127.0.0.1:8002";
+	const reference = process.env.REFERENCE_API_URL ?? "http://127.0.0.1:8003";
 	const isList = request.method === "GET" && route === "contesti";
+	const isReference = request.method === "GET" &&
+		/^contesti\/mimic-[0-9]+\/lettera-originale$/.test(route);
 	const isPreparation =
 		/^preparazioni(?:\/[0-9a-f-]{36}(?:\/(?:genera|interrompi|modifiche|stream|stato|fonti\/[^/]+))?)?$/.test(
 			route,
 		);
 	const allowed =
-		isList ||
+		isList || isReference ||
 		(isPreparation &&
 			((request.method === "GET" && path.length > 1 && !["genera", "interrompi", "modifiche"].includes(path[2])) ||
 				(request.method === "POST" &&
@@ -60,6 +63,8 @@ async function proxy(request: NextRequest, path: string[]) {
 		);
 	const target = isList
 		? `${backend}/api/v1/compilazione/contesti`
+		: isReference
+		? `${reference}/api/v1/revisione/${route}${request.nextUrl.search}`
 		: `${agent}/api/v1/${path.map(encodeURIComponent).join("/")}`;
 	const isStream = request.method === "GET" && path[2] === "stream";
 	try {
@@ -88,7 +93,7 @@ async function proxy(request: NextRequest, path: string[]) {
 		});
 	} catch {
 		return Response.json(
-			{ detail: "Servizio non raggiungibile. Verificare backend e agente." },
+			{ detail: isReference ? "Il servizio delle lettere originali non è raggiungibile." : "Servizio non raggiungibile. Verificare backend e agente." },
 			{ status: 502, headers },
 		);
 	}

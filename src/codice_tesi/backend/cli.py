@@ -22,6 +22,7 @@ def main(argv: list[str] | None = None) -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Crea le tabelle senza importare dati.")
     commands.add_parser("serve", help="Avvia l'API dei pacchetti di compilazione.")
+    commands.add_parser("serve-reference", help="Avvia l'API delle lettere originali.")
     mimic = commands.add_parser("import-mimic", help="Importa un campione MIMIC-IV abbinato.")
     mimic.add_argument("hosp", type=Path, help="Cartella hosp con i CSV compressi.")
     mimic.add_argument("notes", type=Path, help="Cartella note con discharge e radiology.")
@@ -45,13 +46,13 @@ def main(argv: list[str] | None = None) -> None:
     try:
         settings = BackendSettings()
         logging.basicConfig(level=settings.log_level, format="%(message)s")
-        if args.command == "serve":
+        if args.command in ("serve", "serve-reference"):
             import uvicorn
 
             from codice_tesi.backend.app import create_app
 
             uvicorn.run(
-                create_app(settings),
+                create_app(settings, reference_only=args.command == "serve-reference"),
                 host=settings.host,
                 port=settings.port,
                 log_level=settings.log_level.lower(),

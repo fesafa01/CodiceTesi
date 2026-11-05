@@ -18,6 +18,7 @@ from starlette.exceptions import HTTPException
 from codice_tesi.access import LocalIdentity, local_identities
 from codice_tesi.backend.auth import require_context_identity
 from codice_tesi.backend.database import BackendSettings, Database
+from codice_tesi.backend.mimic_comparison import read_reference_notes
 from codice_tesi.backend.repository import BackendError, list_contexts, read_packet
 from codice_tesi.discharge.models import CompositionPacket, Context
 from codice_tesi.discharge.template import LetterTemplate, load_template
@@ -27,6 +28,11 @@ logger = logging.getLogger("clinical_backend")
 router = APIRouter(
     prefix="/api/v1/compilazione",
     tags=["Compilazione"],
+    dependencies=[Depends(require_identity)],
+)
+reference_router = APIRouter(
+    prefix="/api/v1/revisione",
+    tags=["Revisione"],
     dependencies=[Depends(require_identity)],
 )
 
@@ -71,6 +77,22 @@ async def packet(
     )
 
 
+@reference_router.get("/contesti/{context_id}/lettera-originale")
+async def original_letter(
+    request: Request,
+    context_id: str,
+    versione: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    identity: Annotated[LocalIdentity, Depends(require_context_identity)],
+) -> dict[str, str]:
+    notes = await read_reference_notes(request.app.state.database, context_id, versione)
+    if not notes:
+        raise BackendError(
+            404, "LETTERA_NON_DISPONIBILE", "Lettera originale non disponibile per questo ricovero."
+        )
+    note = notes[-1]
+    return {"note_id": note["note_id"], "text": note["text"]}
+
+
 def problem(request, status, code, detail):
     return JSONResponse(
         status_code=status,
@@ -89,6 +111,7 @@ def create_app(
     settings: BackendSettings | None = None,
     *,
     identities: tuple[LocalIdentity, ...] | None = None,
+    reference_only: bool = False,
 ) -> FastAPI:
     settings = settings or BackendSettings()
     if identities is not None and (
@@ -186,12 +209,15 @@ def create_app(
         try:
             async with request.app.state.database.connection(read_only=True) as connection:
                 await connection.execute("SELECT id, payload FROM composition_contexts LIMIT 0")
-                await connection.execute(
-                    "SELECT id, context_id, payload FROM composition_sources LIMIT 0"
-                )
+                if reference_only:
+                    await connection.execute("SELECT notes FROM mimic_discharge_references LIMIT 0")
+                else:
+                    await connection.execute(
+                        "SELECT id, context_id, payload FROM composition_sources LIMIT 0"
+                    )
         except (DatabaseError, PoolTimeout):
             return JSONResponse(status_code=503, content={"stato": "non_pronto"})
         return {"stato": "pronto"}
 
-    app.include_router(router)
+    app.include_router(reference_router if reference_only else router)
     return app

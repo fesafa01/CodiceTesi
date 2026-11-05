@@ -18,6 +18,7 @@ class BackendSettings(BaseSettings):
     database_url: SecretStr = SecretStr(
         "postgresql://clinico:clinico_sintetico@127.0.0.1:5433/clinico"
     )
+    reference_reader_password: SecretStr | None = None
     database_schema: str = Field(default="public", pattern=r"^[a-z_][a-z0-9_]{0,62}$")
     pool_min_size: int = Field(default=1, ge=1, le=20)
     pool_max_size: int = Field(default=4, ge=1, le=20)
@@ -89,3 +90,31 @@ async def initialize_database(database: Database) -> None:
     schema = Path(__file__).with_name("schema.sql").read_text()
     async with database.connection() as connection:
         await connection.execute(schema, prepare=False)
+        password = database.settings.reference_reader_password
+        if password is not None:
+            await connection.execute("SELECT pg_advisory_xact_lock(73012026)")
+            role = await connection.execute(
+                "SELECT 1 FROM pg_roles WHERE rolname = 'clinical_reference_reader'"
+            )
+            if await role.fetchone() is None:
+                await connection.execute("CREATE ROLE clinical_reference_reader LOGIN")
+            await connection.execute(
+                sql.SQL("ALTER ROLE clinical_reference_reader PASSWORD {}").format(
+                    sql.Literal(password.get_secret_value())
+                )
+            )
+            schema_name = sql.Identifier(database.settings.database_schema)
+            await connection.execute(
+                sql.SQL("GRANT USAGE ON SCHEMA {} TO clinical_reference_reader").format(schema_name)
+            )
+            await connection.execute(
+                sql.SQL(
+                    "GRANT SELECT (id, payload) ON {}.composition_contexts "
+                    "TO clinical_reference_reader"
+                ).format(schema_name)
+            )
+            await connection.execute(
+                sql.SQL(
+                    "GRANT SELECT ON {}.mimic_discharge_references TO clinical_reference_reader"
+                ).format(schema_name)
+            )

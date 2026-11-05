@@ -5,7 +5,10 @@ import json
 from collections import defaultdict
 
 import pytest
+from fastapi.testclient import TestClient
 
+from codice_tesi.access import LocalIdentity
+from codice_tesi.backend.app import create_app
 from codice_tesi.backend.database import Database
 from codice_tesi.backend.mimic import add_icu, index_stays, load_mimic, mixed_cohort
 from codice_tesi.backend.mimic_comparison import compare_mimic, mapped_headers
@@ -261,3 +264,48 @@ def test_compare_mimic_requires_matching_version(empty_settings, mimic_subset, t
             assert "Testo riservato" not in packet.model_dump_json()
 
     asyncio.run(verify())
+
+
+def test_reference_is_available_only_from_review_for_assigned_context_and_version(
+    empty_settings, mimic_subset
+):
+    contexts, sources, references = mimic_subset
+    context = contexts[0]
+    reference = references[context.id][-1]
+    references[context.id].insert(0, {**reference, "note_id": "older", "text": "Older version"})
+
+    async def seed():
+        async with Database(empty_settings) as database:
+            await save_dataset(database, contexts, sources, references=references)
+
+    asyncio.run(seed())
+    identities = (
+        LocalIdentity("reviewer", "assigned", frozenset({context.id})),
+        LocalIdentity("other", "unassigned", frozenset()),
+    )
+    route = f"/api/v1/revisione/contesti/{context.id}/lettera-originale"
+    packet = f"/api/v1/compilazione/contesti/{context.id}/pacchetto"
+    version = {"versione": context.dataset_version}
+    headers = {"Authorization": "Bearer assigned"}
+
+    with TestClient(
+        create_app(empty_settings, identities=identities, reference_only=True)
+    ) as client:
+        response = client.get(route, params=version, headers=headers)
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json() == {"note_id": reference["note_id"], "text": reference["text"]}
+        assert client.get(route, params=version).status_code == 401
+        assert (
+            client.get(
+                route, params=version, headers={"Authorization": "Bearer unassigned"}
+            ).status_code
+            == 403
+        )
+        assert client.get(route, params={"versione": "0" * 64}, headers=headers).status_code == 404
+        assert client.get(packet, headers=headers).status_code == 404
+
+    with TestClient(create_app(empty_settings, identities=identities), headers=headers) as client:
+        assert client.get(route, params=version).status_code == 404
+        response = client.get(packet)
+        assert response.status_code == 200 and reference["text"] not in response.text

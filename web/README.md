@@ -20,7 +20,9 @@ le credenziali per l'accesso locale sono descritti nel [README principale](../RE
    da PostgreSQL e sono filtrati per le assegnazioni dell'identità locale.
 2. “Continua” chiama agent-api per recuperare il pacchetto della degenza e
    conservarne uno snapshot. Nella seconda pagina compaiono le 17 sezioni Campus,
-   gli identificativi verificati e tutte le fonti disponibili.
+   gli identificativi verificati e tutte le fonti disponibili. In fondo alla
+   pagina, **Lettera di dimissione originale** apre il riferimento MIMIC-IV-Note
+   per il confronto. Il testo è caricato all'apertura, fuori dallo snapshot.
 3. Ogni sezione ha un editor di testo, utilizzabile prima, durante e dopo la
    generazione. **Salva modifiche** conserva i testi sulla preparazione; prima di
    **Genera** le modifiche presenti vengono salvate anche automaticamente.
@@ -79,12 +81,14 @@ verificare separatamente. Dettagli nelle
 - `web` (porta locale 3000): UI e proxy HTTP sullo stesso origin.
 - `agent-api` (porta interna 8002): preparazione, generazione e stato.
 - `backend` (porta 8001): lettura dei dati clinici dal DB.
+- `reference-api`: servizio di sola lettura per le lettere originali, su una
+  rete Docker interna raggiungibile da `web`.
 
 In modalità MIMIC, web e API richiedono la credenziale del file privato
 `var/mimic/access.env`. Next.js richiede l'accesso Basic e inoltra alle API il
 token Bearer.
 Non sono presenti credenziali LLM nel browser. Le altre variabili server sono
-`APP_BACKEND_URL` e `AGENT_API_URL`. agent-api legge la configurazione LLM e
+`APP_BACKEND_URL`, `AGENT_API_URL` e `REFERENCE_API_URL`. agent-api legge la configurazione LLM e
 l’osservabilità già usate dal client CLI.
 
 Snapshot e stati web sono in `output/dimissioni-mimic/web-sessions/<uuid>/`
@@ -119,6 +123,8 @@ L’override espone 8002 solo per lo sviluppo; in alternativa eseguire localment
 Non avviare contemporaneamente due agent-api sulla stessa cartella di output.
 Per evitare conflitti di porta con il web Docker, fermarlo prima (`docker compose
 stop web`) oppure avviare Next su un’altra porta (`bun run dev --port 3001`).
+Per verificare la consultazione delle lettere originali, usare `web` in Docker
+Compose, dove Next.js raggiunge `reference-api` sulla rete interna.
 
 ```bash
 bun run build

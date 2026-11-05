@@ -715,6 +715,30 @@ h3 {
 	margin: 12px 0;
 	font-size: 10px;
 }
+.reference-letter {
+	margin-top: 24px;
+}
+.reference-letter summary {
+	padding: 18px 24px;
+	font-weight: 600;
+	cursor: pointer;
+}
+.reference-letter-content {
+	padding: 0 24px 24px;
+}
+.reference-letter-content .reader-caption {
+	margin: 8px 0;
+}
+.reference-letter-content pre {
+	padding: 16px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: #f8faf9;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: 13px;
+	line-height: 1.65;
+}
 .source-row {
 	display: flex;
 	align-items: center;

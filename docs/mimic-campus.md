@@ -106,9 +106,12 @@ le estensioni da scaricare e il comando ICU.
   la ricostruzione documentale a posteriori. Per una prova che simuli la
   stesura prima della dimissione, il protocollo deve definire un istante
   di taglio e una variante senza codifica post-hoc.
-- Le lettere originali restano nella tabella `mimic_discharge_references`,
-  leggibile dall'amministratore. Il ruolo dell'API può leggere solo contesti e
-  fonti di compilazione. L'inferenza usa il serving privato sul DGX Spark o un
+- Le lettere originali restano nella tabella `mimic_discharge_references`.
+  CAMPUS mostra l'ultima lettera abbinata quando l'utente apre **Lettera di
+  dimissione originale** in fondo alla degenza. Un servizio di revisione in
+  sola lettura controlla assegnazione e versione del ricovero. Il servizio
+  di compilazione può leggere solo contesti e fonti di compilazione.
+  L'inferenza usa il serving privato sul DGX Spark o un
   endpoint loopback. L'export della telemetria è disattivato per il flusso MIMIC.
   Originali, bozze e confronti sono dati ad accesso ristretto secondo le
   [indicazioni PhysioNet](https://physionet.org/news/post/llm-responsible-use/).

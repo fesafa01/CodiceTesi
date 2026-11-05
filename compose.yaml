@@ -71,12 +71,16 @@ services:
     environment:
       APP_BACKEND_URL: http://backend:8001
       AGENT_API_URL: http://agent-api:8002
+      REFERENCE_API_URL: http://reference-api:8001
+    networks: [default, reference-review]
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
       backend:
         condition: service_healthy
       agent-api:
+        condition: service_healthy
+      reference-api:
         condition: service_healthy
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
@@ -89,6 +93,7 @@ services:
 
   db:
     image: postgres:17-bookworm
+    networks: [default, reference-review]
     environment:
       POSTGRES_DB: clinico
       POSTGRES_USER: clinico
@@ -112,6 +117,7 @@ services:
     environment:
       CLINICAL_DATABASE_URL: postgresql://clinico:clinico_sintetico@db:5432/clinico
       CLINICAL_HOST: 0.0.0.0
+      CLINICAL_REFERENCE_READER_PASSWORD: ${CLINICAL_REFERENCE_READER_PASSWORD:-lettura_riferimento_locale}
     depends_on:
       db:
         condition: service_healthy
@@ -148,6 +154,34 @@ services:
       retries: 3
       start_period: 10s
 
+  reference-api:
+    image: codice-tesi-backend:local
+    init: true
+    command: ["serve-reference"]
+    env_file:
+      - path: var/mimic/access.env
+        required: false
+    environment:
+      CLINICAL_DATABASE_URL: postgresql://clinical_reference_reader:${CLINICAL_REFERENCE_READER_PASSWORD:-lettura_riferimento_locale}@db:5432/clinico
+      CLINICAL_HOST: 0.0.0.0
+    networks: [reference-review]
+    depends_on:
+      backend-admin:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+networks:
+  reference-review:
+    internal: true
 
 volumes:
   clinical-db:

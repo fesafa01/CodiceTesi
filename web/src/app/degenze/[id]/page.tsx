@@ -1,6 +1,7 @@
 "use client";
 import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { ReferenceLetter } from "@/components/reference-letter";
 import { SourceDocument } from "@/components/source-document";
 import { sourceTitle } from "@/lib/source-reader";
 import { letterText, sameEdits, sectionText } from "@/lib/letter-editor";
@@ -573,6 +574,9 @@ export default function LetterPage({
 					</div>
 				</aside>
 			</div>
+			{packet.context.dataset === "mimic-iv-hosp" && (
+				<ReferenceLetter key={id} context={packet.context} />
+			)}
 			<dialog
 				ref={dialog}
 				className="source-dialog"
