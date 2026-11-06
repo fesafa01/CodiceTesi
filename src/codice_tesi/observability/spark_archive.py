@@ -82,6 +82,7 @@ def archive_run(destination: Path, record_path: Path, record: dict) -> dict:
                     "errors": snapshot.get("errors", {}),
                     "error_type": hardware.get("error_type"),
                     "samples_in_run": snapshot.get("run", {}).get("series"),
+                    "energy_in_run": snapshot.get("run", {}).get("energy"),
                     "energy_monitor_window": snapshot.get("energy"),
                     "monitor_window_hours": snapshot.get("requested_hours"),
                 },

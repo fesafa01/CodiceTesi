@@ -1,16 +1,23 @@
 """Acquisizione locale delle misure hardware dello Spark via Tailscale."""
 
 import json
+from bisect import bisect_left, bisect_right
 from datetime import UTC, datetime
 from http.client import HTTPException
+from itertools import pairwise
 from math import isfinite
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import monotonic, sleep
 from urllib.parse import urlencode, urlsplit
 from urllib.request import urlopen
 
 SPARK_MONITOR_URL = "http://spark-413e.tail9c981a.ts.net:9108"
 SPARK_HOSTS = {"spark-413e", urlsplit(SPARK_MONITOR_URL).hostname}
+HISTORY_RETRY_SECONDS = 12
+HISTORY_POLL_SECONDS = 2
+MAX_POWER_GAP_SECONDS = 20
+MONITOR_ERRORS = (HTTPException, OSError, ValueError)
 
 
 def run_interval(record):
@@ -26,42 +33,136 @@ def run_interval(record):
     return start.astimezone(UTC), end.astimezone(UTC)
 
 
+def _fetch_endpoint(base_url, endpoint, query, timeout):
+    url = f"{base_url.rstrip('/')}/{endpoint}?{query}"
+    with urlopen(url, timeout=timeout) as response:
+        payload = json.load(response)
+    if not isinstance(payload, dict):
+        raise ValueError("Risposta senza un oggetto JSON")
+    if endpoint == "history" and not isinstance(payload.get("series"), list):
+        raise ValueError("Risposta senza la serie dei campioni")
+    return payload
+
+
+def _finite_number(value):
+    return type(value) in (int, float) and isfinite(value)
+
+
+def _valid_timestamps(series):
+    return all(isinstance(sample, dict) and _finite_number(sample.get("t")) for sample in series)
+
+
+def _energy_result(*, source=None, wh=None, reason=None, max_gap=None):
+    return {
+        "wh": wh,
+        "source": source,
+        "status": "estimated" if wh is not None else "unavailable",
+        "reason": reason,
+        "max_sample_gap_s": max_gap,
+    }
+
+
+def _integrate_power(samples, source, lower, upper, gap_limit):
+    timestamps = sorted(samples)
+    start = bisect_right(timestamps, lower) - 1
+    end = bisect_left(timestamps, upper)
+    if start < 0:
+        return _energy_result(source=source, reason="missing_start_sample")
+    if end == len(timestamps):
+        return _energy_result(source=source, reason="missing_end_sample")
+
+    intervals = list(pairwise(timestamps[start : end + 1]))
+    max_gap = max((right - left for left, right in intervals), default=0)
+    if max_gap > gap_limit:
+        return _energy_result(source=source, reason="sample_gap_too_large", max_gap=max_gap)
+
+    watt_seconds = 0.0
+    for left, right in intervals:
+        clipped_left = max(left, lower)
+        clipped_right = min(right, upper)
+        slope = (samples[right] - samples[left]) / (right - left)
+        first_watts = samples[left] + slope * (clipped_left - left)
+        last_watts = samples[left] + slope * (clipped_right - left)
+        watt_seconds += (first_watts + last_watts) / 2 * (clipped_right - clipped_left)
+    return _energy_result(source=source, wh=watt_seconds / 3600, max_gap=max_gap)
+
+
+def _run_energy(history, lower, upper):
+    step = history.get("step")
+    gap_limit = MAX_POWER_GAP_SECONDS
+    if _finite_number(step) and step > 0:
+        gap_limit = min(gap_limit, 2 * step)
+    result = _energy_result(reason="no_power_samples")
+    for source in ("plug", "gpu"):
+        field = f"{source}_power_w"
+        samples = {
+            sample["t"]: sample[field]
+            for sample in history["series"]
+            if _finite_number(sample.get(field)) and sample[field] >= 0
+        }
+        if not samples:
+            continue
+        candidate = _integrate_power(samples, source, lower, upper, gap_limit)
+        if candidate["status"] == "estimated":
+            return candidate
+        if result["reason"] != "missing_end_sample":
+            result = candidate
+    return result
+
+
+def _capture_run_energy(snapshot, query, timeout, lower, upper):
+    history = snapshot["history"]
+    if history is None:
+        return [], _energy_result(reason="history_unavailable")
+    if not _valid_timestamps(history["series"]):
+        snapshot["errors"]["history"] = "InvalidSampleTimestamp"
+        return [], _energy_result(reason="invalid_sample_timestamp")
+
+    result = _run_energy(history, lower, upper)
+    deadline = monotonic() + HISTORY_RETRY_SECONDS
+    while result["reason"] == "missing_end_sample":
+        remaining = deadline - monotonic()
+        if remaining <= HISTORY_POLL_SECONDS:
+            break
+        sleep(HISTORY_POLL_SECONDS)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            break
+        try:
+            candidate = _fetch_endpoint(
+                snapshot["base_url"], "history", query, min(timeout, remaining)
+            )
+        except MONITOR_ERRORS:
+            continue
+        if candidate["series"] and _valid_timestamps(candidate["series"]):
+            history = candidate
+            result = _run_energy(history, lower, upper)
+    snapshot["history"] = history
+    return history["series"], result
+
+
 def capture_snapshot(base_url, hours, *, record=None, timeout=15):
     query = urlencode({"hours": hours})
     snapshot = {"base_url": base_url, "requested_hours": hours, "errors": {}}
     for endpoint in ("history", "energy"):
         try:
-            url = f"{base_url.rstrip('/')}/{endpoint}?{query}"
-            with urlopen(url, timeout=timeout) as response:
-                payload = json.load(response)
-            if not isinstance(payload, dict):
-                raise ValueError("Risposta senza un oggetto JSON")
-            if endpoint == "history" and not isinstance(payload.get("series"), list):
-                raise ValueError("Risposta senza la serie dei campioni")
-            snapshot[endpoint] = payload
-        except (HTTPException, OSError, ValueError) as exc:
+            snapshot[endpoint] = _fetch_endpoint(base_url, endpoint, query, timeout)
+        except MONITOR_ERRORS as exc:
             snapshot[endpoint] = None
             snapshot["errors"][endpoint] = type(exc).__name__
-    snapshot["captured_at"] = datetime.now(UTC).isoformat()
 
     if record is not None:
         start, end = run_interval(record)
         lower, upper = start.timestamp(), end.timestamp()
-        series = (snapshot["history"] or {}).get("series", [])
-        if not all(
-            isinstance(sample, dict)
-            and type(sample.get("t")) in (int, float)
-            and isfinite(sample["t"])
-            for sample in series
-        ):
-            snapshot["errors"]["history"] = "InvalidSampleTimestamp"
-            series = []
+        series, energy = _capture_run_energy(snapshot, query, timeout, lower, upper)
         snapshot["run"] = {
             "run_id": record["run_id"],
             "started_at": start.isoformat(),
             "ended_at": end.isoformat(),
             "series": [sample for sample in series if lower <= sample["t"] <= upper],
+            "energy": energy,
         }
+    snapshot["captured_at"] = datetime.now(UTC).isoformat()
     return snapshot
 
 

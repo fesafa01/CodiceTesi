@@ -16,6 +16,18 @@ host saltano la raccolta. Un endpoint in errore è indicato in `errors`; i dati
 ricevuti dall'altro endpoint restano disponibili. La richiesta invia solo la
 finestra temporale al monitor. Il `run_id` e l'associazione restano locali.
 
+`run.energy` stima i Wh fra inizio e fine prova dai timestamp di `/history`,
+con integrazione trapezoidale e interpolazione ai bordi. L'archivio copia la
+stima in `hardware_spark.energy_in_run` di `metriche.json`. `source` vale `plug`
+se `plug_power_w` copre la prova, altrimenti si valuta `gpu_power_w` per l'intera
+prova (`gpu`). La misura GPU riguarda il consumo della GPU. `max_sample_gap_s`
+include gli intervalli usati per interpolare ai bordi. Si accettano intervalli
+fino al doppio di `history.step`, con un tetto di 20 secondi. In assenza del
+passo si applica il tetto. Se l'ultimo campione è ancora atteso, la raccolta
+riprova `/history` per un massimo di 12 secondi. Quando la serie non basta,
+`wh` è `null`, `status` è `unavailable` e `reason` indica il motivo. Il totale
+della finestra mobile è archiviato separatamente in `energy_monitor_window`.
+
 ## Raccolta manuale via API
 
 Dalla radice `CodiceTesi`, con Tailscale connesso:
@@ -29,8 +41,9 @@ Nel secondo comando, sostituire `RUN_ID` con l'identificativo di una prova
 conclusa e lanciare il comando appena termina. Lo script interroga `/history`
 e `/energy` su `http://spark-413e.tail9c981a.ts.net:9108` e salva entrambe le
 risposte in un JSON con timestamp UTC in `output/metriche/spark/`. Con `--run`
-aggiunge `run.run_id` e `run.series`, che contiene i punti con timestamp compreso
-fra `started_at` ed `ended_at`. Lo script usa la libreria standard di Python.
+aggiunge `run.run_id`, `run.energy` e `run.series`, che contiene i punti con
+timestamp compreso fra `started_at` ed `ended_at`. Lo script usa la libreria
+standard di Python.
 
 La finestra predefinita è di 24 ore per la raccolta generale e 15 minuti per
 la singola prova. Per una prova più lunga o conclusa da più tempo, usare
