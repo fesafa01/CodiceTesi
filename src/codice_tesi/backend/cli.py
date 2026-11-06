@@ -13,7 +13,9 @@ from pydantic import ValidationError
 
 from codice_tesi.backend.database import BackendSettings, Database, initialize_database
 from codice_tesi.backend.mimic import MAX_CASES, load_mimic
+from codice_tesi.backend.mimic_audit import audit_mimic
 from codice_tesi.backend.mimic_comparison import compare_mimic, profile_mimic
+from codice_tesi.backend.mimic_coverage import audit_candidate_coverage
 from codice_tesi.backend.repository import save_dataset
 
 
@@ -30,9 +32,41 @@ def main(argv: list[str] | None = None) -> None:
     mimic.add_argument("--icu", type=Path, help="Cartella ICU 2.2 per il campione misto.")
     mimic.add_argument("--limit", type=int, default=20, help=f"Ricoveri (1–{MAX_CASES}).")
     mimic.add_argument("--seed", type=int, default=42, help="Seed di selezione riproducibile.")
+    mimic.add_argument(
+        "--min-discharge-cases",
+        type=int,
+        default=0,
+        help="Minimo di ricoveri con ordini di dimissione utilizzabili nel campione misto.",
+    )
+    mimic.add_argument(
+        "--min-complete-cases",
+        type=int,
+        default=0,
+        help="Minimo di ricoveri con Discharge Med, candidato POE di follow-up, ED e ICU.",
+    )
+    mimic.add_argument(
+        "--rich-pilot",
+        action="store_true",
+        help="Priorità alla copertura, fonti estese ed etichette del pilota.",
+    )
     mimic.add_argument("--replace", action="store_true", help="Sostituisce il solo campione MIMIC.")
     mimic.add_argument(
         "--access-file", type=Path, help="Scrive token e assegnazioni locali in un file privato."
+    )
+    audit = commands.add_parser(
+        "audit-mimic", help="Confronta gli ordini nei CSV Hosp con il campione PostgreSQL."
+    )
+    audit.add_argument("hosp", type=Path, help="Cartella hosp con i CSV compressi.")
+    audit.add_argument("--expect", type=int, default=30, help="Ricoveri attesi in PostgreSQL.")
+    coverage = commands.add_parser(
+        "audit-mimic-candidates", help="Misura la copertura delle fonti nei candidati MIMIC."
+    )
+    coverage.add_argument("hosp", type=Path)
+    coverage.add_argument("notes", type=Path)
+    coverage.add_argument("--ed", type=Path, required=True)
+    coverage.add_argument("--icu", type=Path, required=True)
+    coverage.add_argument(
+        "--extended", action="store_true", help="Scansiona anche i CSV di laboratorio ed eMAR."
     )
     commands.add_parser("profile-mimic", help="Conta le intestazioni nei riferimenti, senza testo.")
     comparison = commands.add_parser(
@@ -74,9 +108,20 @@ def main(argv: list[str] | None = None) -> None:
 
 
 async def run_command(settings, args):
+    if args.command == "audit-mimic-candidates":
+        audit_candidate_coverage(args.hosp, args.notes, args.ed, args.icu, extended=args.extended)
+        return
     if args.command == "import-mimic":
         contexts, sources, references = load_mimic(
-            args.hosp, args.notes, limit=args.limit, seed=args.seed, ed=args.ed, icu=args.icu
+            args.hosp,
+            args.notes,
+            limit=args.limit,
+            seed=args.seed,
+            ed=args.ed,
+            icu=args.icu,
+            min_discharge_cases=args.min_discharge_cases,
+            min_complete_cases=args.min_complete_cases,
+            rich_pilot=args.rich_pilot,
         )
         if args.ed is not None:
             validate_mimic_requests(contexts, sources)
@@ -92,6 +137,10 @@ async def run_command(settings, args):
             if args.access_file:
                 write_mimic_access(args.access_file, contexts)
             print(f"MIMIC-IV: {count} ricoveri. " + ("Importati." if changed else "Già presenti."))
+        elif args.command == "audit-mimic":
+            if not 1 <= args.expect <= MAX_CASES:
+                raise ValueError(f"Usare da 1 a {MAX_CASES} ricoveri attesi.")
+            await audit_mimic(database, args.hosp, args.expect)
         elif args.command == "profile-mimic":
             await profile_mimic(database)
         elif args.command == "compare-mimic":
@@ -100,13 +149,15 @@ async def run_command(settings, args):
 
 
 def validate_mimic_requests(contexts, sources) -> None:
-    from codice_tesi.config import ModelConfig
+    from codice_tesi.config import ModelConfig, Settings
     from codice_tesi.discharge.config import ContextConfig
     from codice_tesi.discharge.context import prepare_request
     from codice_tesi.discharge.models import CompositionPacket
     from codice_tesi.discharge.template import load_template
 
-    model = ModelConfig(thinking=False)
+    model = ModelConfig(model=Settings().model, thinking=False)
+    if any(context.expanded_sources for context in contexts):
+        print("Preparazione e stima dei pacchetti completi.", flush=True)
     template = load_template()
     estimates = []
     for context in contexts:
@@ -120,7 +171,7 @@ def validate_mimic_requests(contexts, sources) -> None:
         )
         estimates.append(request.input_tokens_estimate)
     print(
-        f"Pacchetti verificati senza inferenza: {len(estimates)}, "
+        f"Pacchetti completi preparati senza inferenza: {len(estimates)}, "
         f"{min(estimates)}–{max(estimates)} token di input stimati."
     )
 

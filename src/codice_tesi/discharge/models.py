@@ -9,6 +9,8 @@ from codice_tesi.discharge.contracts import Contract
 from codice_tesi.discharge.template import LetterTemplate, load_template
 
 MIMIC_DATASET = "mimic-iv-hosp"
+MIMIC_DISCHARGE_ORDERS = "pharmacy + hosp/prescriptions (Discharge Med)"
+MIMIC_FOLLOWUP_ORDERS = "poe + hosp/poe_detail (candidati follow-up)"
 
 
 class Context(Contract):
@@ -21,6 +23,8 @@ class Context(Contract):
     patient_id: str | None = None
     episode_id: str | None = None
     limitations: tuple[str, ...] = ()
+    display_name: str | None = None
+    expanded_sources: bool = False
 
     @model_validator(mode="after")
     def identity(self):

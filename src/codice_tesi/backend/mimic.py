@@ -4,23 +4,42 @@ import csv
 import gzip
 import hashlib
 import json
+import logging
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from codice_tesi.discharge.models import MIMIC_DATASET, Context, EvidenceSource
+from codice_tesi.discharge.models import (
+    MIMIC_DATASET,
+    MIMIC_DISCHARGE_ORDERS,
+    MIMIC_FOLLOWUP_ORDERS,
+    Context,
+    EvidenceSource,
+)
 
-EXTRACTION = "hosp-note-2.2-expanded-v2"
+EXTRACTION = "hosp-note-2.2-expanded-v3"
 MAX_CASES = 100
-MIXED_EXTRACTION = "hosp-note-ed-icu-2.2-v1"
+MIXED_EXTRACTION = "hosp-note-ed-icu-2.2-v2"
+RICH_EXTRACTION = "hosp-note-ed-icu-2.2-rich-v1"
+MIXED_PATHS = ((True, True), (True, False), (False, True), (False, False))
+DISCHARGE_ORDERS = MIMIC_DISCHARGE_ORDERS
+POE_ORDERS = "poe + hosp/poe_detail"
+FOLLOWUP_ORDERS = MIMIC_FOLLOWUP_ORDERS
+FOLLOWUP_SIGNAL = re.compile(r"\b(?:follow[\s-]*up|post[\s-]*discharge|after discharge)\b", re.I)
+logger = logging.getLogger(__name__)
 
 
-def rows(root: Path, table: str, *, keys=None, key_columns=("subject_id", "hadm_id")):
+def rows(root: Path, table: str, *, keys=None, key_columns=("subject_id", "hadm_id"), match=None):
     path = root / f"{table}.csv.gz"
     with gzip.open(path, "rt", encoding="utf-8", newline="") as file:
         records = csv.reader(file)
         columns = next(records, [])
         if not columns:
             raise ValueError(f"Intestazione CSV mancante: {table}.")
+        if match is not None:
+            column, value = match
+            index = columns.index(column)
+            records = (record for record in records if record[index] == value)
         if keys is not None:
             left, right = map(columns.index, key_columns)
             records = (record for record in records if (record[left], record[right]) in keys)
@@ -86,10 +105,8 @@ def index_stays(root, table, admissions):
     return stays
 
 
-def mixed_cohort(hosp, notes, admissions, ed_stays, icu_stays, *, limit, seed):
-    """Bilancia i percorsi di cura e privilegia servizi e categorie ICD diversi."""
-    ed_keys = {key for key, _ in ed_stays.values()}
-    icu_keys = {key for key, _ in icu_stays.values()}
+def mixed_eligibility(hosp, notes, admissions):
+    """Raccoglie gli abbinamenti di riferimento, il primo servizio e la diagnosi principale."""
     with_letter = {
         pair(row) for row in rows(notes, "discharge", keys=admissions) if row["text"].strip()
     }
@@ -104,20 +121,104 @@ def mixed_cohort(hosp, notes, admissions, ed_stays, icu_stays, *, limit, seed):
         for row in rows(hosp, "diagnoses_icd", keys=with_letter)
         if row["seq_num"] == "1" and row["icd_code"]
     }
+    return services, diagnosis
+
+
+def mixed_cohort(
+    hosp,
+    notes,
+    admissions,
+    ed_stays,
+    icu_stays,
+    *,
+    limit,
+    seed,
+    min_discharge_cases=0,
+    min_complete_cases=0,
+    rich_pilot=False,
+    ed=None,
+):
+    """Bilancia i percorsi di cura e privilegia servizi e categorie ICD diversi."""
+    discharge_cases = set()
+    required_discharge = max(min_discharge_cases, min_complete_cases)
+    if required_discharge or rich_pilot:
+        logger.info("Ricerca degli ordini di dimissione nei CSV Hosp.")
+        discharge_cases = find_discharge_cases(hosp, admissions)
+        count = len({subject for subject, _ in discharge_cases})
+        logger.info(
+            "Pazienti con ordini di dimissione utilizzabili prima degli altri vincoli: %s.", count
+        )
+        if count < required_discharge:
+            raise ValueError(
+                f"Solo {count} pazienti con ordini di dimissione utilizzabili. "
+                f"Quota richiesta: {required_discharge}."
+            )
+
+    ed_keys = {key for key, _ in ed_stays.values()}
+    icu_keys = {key for key, _ in icu_stays.values()}
+    services, diagnosis = mixed_eligibility(hosp, notes, admissions)
+    eligible = diagnosis.keys() & services.keys()
+    complete_cases = set()
+    if min_complete_cases:
+        candidates = discharge_cases & ed_keys & icu_keys & eligible
+        if candidates:
+            logger.info("Ricerca dei candidati POE nei ricoveri con terapia, ED e ICU.")
+            candidate_admissions = {key: admissions[key] for key in candidates}
+            orders, details = load_poe(hosp, candidate_admissions)
+            complete_cases = {
+                key
+                for identity, (key, row) in orders.items()
+                if followup_order_exclusion(row, admissions[key]) is None
+                and followup_signals(row, details[identity])
+            }
+        count = len({subject for subject, _ in complete_cases})
+        logger.info("Pazienti idonei con terapia, candidato POE, ED e ICU: %s.", count)
+        if count < min_complete_cases:
+            raise ValueError(
+                f"Solo {count} pazienti soddisfano tutti i criteri. "
+                f"Quota richiesta: {min_complete_cases}."
+            )
+
+    coverage_counts = Counter()
+    if rich_pilot:
+        from codice_tesi.backend.mimic_coverage import clinical_coverage
+
+        eligible_admissions = {key: admissions[key] for key in eligible}
+        coverage = clinical_coverage(hosp, notes, ed, ed_stays, eligible_admissions, extended=True)
+        for keys in (*coverage.values(), discharge_cases):
+            coverage_counts.update(keys)
+
     strata = defaultdict(list)
-    for key in with_letter & diagnosis.keys() & services.keys():
+    for key in eligible:
         stratum = key in ed_keys, key in icu_keys
         rank = hashlib.sha256(f"{seed}:{key[0]}:{key[1]}".encode()).digest()
         strata[stratum].append((key, services[key][1], diagnosis[key], rank))
 
     selected, patients = set(), set()
     service_counts, diagnosis_counts = Counter(), Counter()
-    for index in range(limit):
-        stratum = ((True, True), (True, False), (False, True), (False, False))[index % 4]
-        choices = (candidate for candidate in strata[stratum] if candidate[0][0] not in patients)
+    covered = 0
+    paths = [MIXED_PATHS[index % len(MIXED_PATHS)] for index in range(limit)]
+    # Riserva prima i posti con tutti i criteri, mantenendo il numero di posti per percorso.
+    for _ in range(min_complete_cases):
+        paths.remove(MIXED_PATHS[0])
+    paths = [MIXED_PATHS[0]] * min_complete_cases + paths
+    for index, stratum in enumerate(paths):
+        choices = (
+            candidate
+            for candidate in strata[stratum]
+            if candidate[0][0] not in patients
+            and (index >= min_complete_cases or candidate[0] in complete_cases)
+        )
         best = min(
             choices,
-            key=lambda c: (service_counts[c[1]], diagnosis_counts[c[2]], c[3], c[0]),
+            key=lambda c: (
+                covered < min_discharge_cases and c[0] not in discharge_cases,
+                -coverage_counts[c[0]],
+                service_counts[c[1]],
+                diagnosis_counts[c[2]],
+                c[3],
+                c[0],
+            ),
             default=None,
         )
         if best is None:
@@ -125,8 +226,25 @@ def mixed_cohort(hosp, notes, admissions, ed_stays, icu_stays, *, limit, seed):
         key, service, code, _ = best
         selected.add(key)
         patients.add(key[0])
+        covered += key in discharge_cases
         service_counts[service] += 1
         diagnosis_counts[code] += 1
+
+    if covered < min_discharge_cases:
+        raise ValueError(
+            f"La selezione mista ha trovato {covered}/{min_discharge_cases} ricoveri "
+            "con ordini di dimissione utilizzabili. Ridurre --min-discharge-cases."
+        )
+    if required_discharge:
+        logger.info(
+            "Campione selezionato: %s/%s ricoveri con ordini di dimissione.", covered, limit
+        )
+    if min_complete_cases:
+        logger.info(
+            "Ricoveri selezionati con terapia, candidato POE, ED e ICU: %s/%s.",
+            len(selected & complete_cases),
+            limit,
+        )
 
     references = defaultdict(list)
     for row in rows(notes, "discharge", keys=selected):
@@ -139,7 +257,7 @@ def mixed_cohort(hosp, notes, admissions, ed_stays, icu_stays, *, limit, seed):
     return references
 
 
-def add_ed(ed, stays, admissions, groups):
+def add_ed(ed, stays, admissions, groups, *, full=False):
     for key, stay in stays.values():
         if key in admissions:
             groups[key]["ed/edstays"].append(
@@ -210,12 +328,12 @@ def add_ed(ed, stays, admissions, groups):
             ordered = sorted(entries)
             groups[key][f"ed/{table}"] = (
                 ordered
-                if len(ordered) <= cap
+                if full or len(ordered) <= cap
                 else [*ordered[: cap // 2], *ordered[-(cap - cap // 2) :]]
             )
 
 
-def add_icu(icu, stays, admissions, groups):
+def add_icu(icu, stays, admissions, groups, *, full=False):
     items = {row["itemid"]: row["label"] for row in rows(icu, "d_items")}
     for key, stay in stays.values():
         groups[key]["icu/icustays"].append(
@@ -268,6 +386,7 @@ def add_icu(icu, stays, admissions, groups):
         ),
     ):
         series = defaultdict(dict)
+        full_events = defaultdict(list)
         for row in rows(icu, table, keys=stays, key_columns=("subject_id", "stay_id")):
             key, stay = stays[row["subject_id"], row["stay_id"]]
             time = row[start]
@@ -277,16 +396,23 @@ def add_icu(icu, stays, admissions, groups):
             ):
                 continue
             detail = compact(row, *fields)
-            if not detail or len(detail) > 300 or "\n" in detail or "\r" in detail:
+            if not detail or (not full and (len(detail) > 300 or "\n" in detail or "\r" in detail)):
                 continue
+            if full:
+                detail = " ".join(detail.split())
             item = row["itemid"]
             line = (
                 f"{time} | {label} | {items.get(item, item)} | stay_id={row['stay_id']} | {detail}"
             )
             event = time, line
+            if full:
+                full_events[key].append(event)
+                continue
             group = row["stay_id"], item, row.get("statusdescription", "")
             first, last = series[key].get(group, (event, event))
             series[key][group] = min(first, event), max(last, event)
+        for key, entries in full_events.items():
+            groups[key][f"icu/{table}"] = entries
         for key, by_item in series.items():
             newest = sorted(by_item.values(), key=lambda pair: pair[1])[-cap:]
             groups[key][f"icu/{table}"] = sorted({event for pair in newest for event in pair})
@@ -306,7 +432,7 @@ def compact(row, *columns):
     return " | ".join(f"{key}={row[key]}" for key in columns if row[key])
 
 
-def add_groups(hosp, notes, admissions, groups):
+def add_groups(hosp, notes, admissions, groups, *, full=False):
     for table, kind, columns in (
         ("services", "Servizio", ("transfertime", "prev_service", "curr_service")),
         ("transfers", "Trasferimento", ("transfer_id", "eventtype", "careunit", "intime")),
@@ -335,20 +461,23 @@ def add_groups(hosp, notes, admissions, groups):
             line = f"{label} | ICD-{version}: {code} | {title} | seq_num={row['seq_num']}"
             groups[key][table].append((int(row["seq_num"]), f"{date} | {line}" if date else line))
 
-    add_labs(hosp, admissions, groups)
-    add_medications(hosp, admissions, groups)
-    add_documented_events(hosp, admissions, groups)
+    add_labs(hosp, admissions, groups, full=full)
+    add_medications(hosp, admissions, groups, full=full)
+    add_documented_events(hosp, admissions, groups, full=full)
 
     for key, row in linked(notes, "radiology", admissions):
-        if during(row, admissions[key], "charttime", "storetime") and (
-            0 < len(row["text"].strip()) <= 10000
+        length = len(row["text"].strip())
+        if (
+            length
+            and (full or length <= 10000)
+            and during(row, admissions[key], "charttime", "storetime")
         ):
             groups[key]["radiology"].append(
                 (row["storetime"], row["charttime"], row["note_id"], row["text"])
             )
 
 
-def add_labs(hosp, admissions, groups):
+def add_labs(hosp, admissions, groups, *, full=False):
     items = {row["itemid"]: row for row in rows(hosp, "d_labitems")}
     labs = defaultdict(lambda: defaultdict(list))
     for key, row in linked(hosp, "labevents", admissions):
@@ -364,25 +493,95 @@ def add_labs(hosp, admissions, groups):
             line += f" | campione={item['fluid']}"
         series = labs[key][row["itemid"]]
         series.append((rank, line))
-        series.sort()
-        if len(series) > 3:
-            del series[1]  # Prima misura e ultime due per lo stesso item.
+        if not full:
+            series.sort()
+            if len(series) > 3:
+                del series[1]  # Prima misura e ultime due per lo stesso item.
     for key, by_item in labs.items():
-        series = sorted(by_item.values(), key=lambda entries: entries[-1])[-60:]
+        series = (
+            by_item.values()
+            if full
+            else sorted(by_item.values(), key=lambda entries: entries[-1])[-60:]
+        )
         groups[key]["labevents"] = [event for item in series for event in item]
 
 
-def add_medications(hosp, admissions, groups):
+def discharge_order_exclusion(row, admission):
+    if not row["pharmacy_id"]:
+        return "senza_pharmacy_id"
+    if row["status"] != "Active":
+        return "non_attivo"
+    if not row["verifiedtime"]:
+        return "senza_verifica"
+    if not during(row, admission, "entertime", "verifiedtime"):
+        return "fuori_finestra"
+    return None
+
+
+def find_discharge_cases(hosp, admissions):
+    """Applica alla selezione gli stessi criteri usati per produrre la fonte."""
+    cases = set()
+    needs_prescription = defaultdict(set)
+    for row in rows(hosp, "pharmacy", keys=admissions, match=("proc_type", "Discharge Med")):
+        key = pair(row)
+        if discharge_order_exclusion(row, admissions[key]) is not None:
+            continue
+        if row.get("medication", "").strip():
+            cases.add(key)
+        else:
+            needs_prescription[key].add(row["pharmacy_id"])
+
+    pending = needs_prescription.keys() - cases
+    if pending:
+        for key, row in linked(hosp, "prescriptions", pending):
+            if row["pharmacy_id"] in needs_prescription[key] and row["drug"].strip():
+                cases.add(key)
+    return cases
+
+
+def discharge_order_line(row, prescription=None):
+    prescription = prescription or {}
+    fields = {
+        "pharmacy_id": row["pharmacy_id"],
+        "poe_id": row.get("poe_id") or prescription.get("poe_id"),
+        "drug": prescription.get("drug") or row.get("medication"),
+        "dose_val_rx": prescription.get("dose_val_rx"),
+        "dose_unit_rx": prescription.get("dose_unit_rx"),
+        "route": prescription.get("route") or row.get("route"),
+        "doses_per_24_hrs": prescription.get("doses_per_24_hrs") or row.get("doses_per_24_hrs"),
+        **{
+            name: row.get(name)
+            for name in (
+                "proc_type",
+                "status",
+                "entertime",
+                "verifiedtime",
+                "frequency",
+                "duration",
+                "duration_interval",
+                "disp_sched",
+            )
+        },
+    }
+    time = row["verifiedtime"]
+    return time, f"{time} | Ordine di farmacia per dimissione | {compact(fields, *fields)}"
+
+
+def add_medications(hosp, admissions, groups, *, full=False):
     pharmacy = {}
     for key, row in linked(hosp, "pharmacy", admissions):
-        if admissions[key]["admittime"] <= row["entertime"] <= admissions[key]["dischtime"]:
+        if row["pharmacy_id"] and (
+            row["proc_type"] == "Discharge Med"
+            or admissions[key]["admittime"] <= row["entertime"] <= admissions[key]["dischtime"]
+        ):
             pharmacy[key, row["pharmacy_id"]] = row
 
     orders = defaultdict(dict)
     discharge = defaultdict(set)
+    linked_discharge = set()
     for key, row in linked(hosp, "prescriptions", admissions):
         start, drug = row["starttime"], row["drug"]
-        if not drug:
+        if not drug.strip():
             continue
         order_id = row["pharmacy_id"]
         dispensing = pharmacy.get((key, order_id), {})
@@ -397,49 +596,45 @@ def add_medications(hosp, admissions, groups):
             "doses_per_24_hrs",
         )
         if dispensing.get("proc_type") == "Discharge Med":
-            if dispensing["status"] != "Active" or not during(
-                dispensing, admissions[key], "entertime", "verifiedtime"
-            ):
-                continue
-            when = dispensing["verifiedtime"]
-            details += " | " + compact(
-                dispensing,
-                "proc_type",
-                "status",
-                "entertime",
-                "verifiedtime",
-                "frequency",
-                "duration",
-                "duration_interval",
-            )
-            discharge[key].add((when, f"{when} | Ordine di farmacia per dimissione | {details}"))
+            if discharge_order_exclusion(dispensing, admissions[key]) is None:
+                discharge[key].add(discharge_order_line(dispensing, row))
+                linked_discharge.add((key, order_id))
             continue
         if admissions[key]["admittime"] <= start <= admissions[key]["dischtime"]:
             if dispensing:
                 details += " | " + compact(dispensing, "proc_type", "status", "entertime")
-            label = drug, row["route"]
             order = start, f"{start} | Ordine farmacologico in degenza | {details}"
+            label = order if full else (drug, row["route"])
             orders[key][label] = max(orders[key].get(label, order), order)
     for key, by_drug in orders.items():
-        groups[key]["prescriptions"] = sorted(by_drug.values())[-40:]
+        ordered = sorted(by_drug.values())
+        groups[key]["prescriptions"] = ordered if full else ordered[-40:]
+    for (key, order_id), row in pharmacy.items():
+        if (
+            row["proc_type"] == "Discharge Med"
+            and (key, order_id) not in linked_discharge
+            and (row.get("medication") or "").strip()
+            and discharge_order_exclusion(row, admissions[key]) is None
+        ):
+            discharge[key].add(discharge_order_line(row))
     for key, events in discharge.items():
-        groups[key]["pharmacy + hosp/prescriptions (Discharge Med)"] = sorted(events)[-40:]
+        groups[key][DISCHARGE_ORDERS] = sorted(events)
 
     administrations = defaultdict(dict)
     for key, row in linked(hosp, "emar", admissions):
         if not row["medication"] or not during(row, admissions[key], "charttime", "storetime"):
             continue
-        label = row["medication"], row["event_txt"]
+        label = (row["emar_id"],) if full else (row["medication"], row["event_txt"])
         rank = row["charttime"], row["storetime"], row["emar_id"]
         previous = administrations[key].get(label)
         if previous is None or rank > previous[0]:
             administrations[key][label] = rank, row
 
-    selected = {
-        (key[0], row["emar_id"]): (key, row)
-        for key, entries in administrations.items()
-        for _, row in sorted(entries.values(), key=lambda entry: entry[0])[-64:]
-    }
+    selected = {}
+    for key, entries in administrations.items():
+        ordered = sorted(entries.values(), key=lambda entry: entry[0])
+        for _, row in ordered if full else ordered[-64:]:
+            selected[key[0], row["emar_id"]] = key, row
     details = defaultdict(set)
     if selected:
         for row in rows(hosp, "emar_detail", keys=selected, key_columns=("subject_id", "emar_id")):
@@ -458,27 +653,122 @@ def add_medications(hosp, admissions, groups):
     for event_id, (key, row) in selected.items():
         time = row["charttime"]
         line = compact(row, "emar_id", "pharmacy_id", "medication", "event_txt", "storetime")
-        extras = sorted(details[event_id])[:4]
+        extras = sorted(details[event_id])
+        if not full:
+            extras = extras[:4]
         groups[key]["emar + hosp/emar_detail"].append(
             (time, " | ".join([time, "Evento registrato eMAR", line, *extras]))
         )
 
 
-def add_documented_events(hosp, admissions, groups):
+def load_poe(hosp, admissions):
+    orders = {(key[0], row["poe_id"]): (key, row) for key, row in linked(hosp, "poe", admissions)}
+    details = defaultdict(set)
+    if orders:
+        for row in rows(hosp, "poe_detail", keys=orders, key_columns=("subject_id", "poe_id")):
+            if row["field_value"].strip():
+                details[row["subject_id"], row["poe_id"]].add(
+                    compact(row, "field_name", "field_value")
+                )
+    return orders, details
+
+
+def followup_signals(row, details):
+    return {
+        part
+        for part in (compact(row, "order_type"), compact(row, "order_subtype"), *details)
+        if FOLLOWUP_SIGNAL.search(" ".join(part.split()))
+    }
+
+
+def followup_order_exclusion(row, admission):
+    if not admission["admittime"] <= row["ordertime"] <= admission["dischtime"]:
+        return "fuori_finestra"
+    if row["order_status"] != "Active" or row["transaction_type"] == "D/C":
+        return "non_attivo_o_annullato"
+    return None
+
+
+def poe_fields(row):
+    return compact(
+        row,
+        "poe_id",
+        "order_type",
+        "order_subtype",
+        "transaction_type",
+        "order_status",
+        "discontinue_of_poe_id",
+    )
+
+
+def add_poe(hosp, admissions, groups, *, full=False):
+    all_orders, details = load_poe(hosp, admissions)
+    orders = defaultdict(dict)
+    for order_id, (key, row) in all_orders.items():
+        time = row["ordertime"]
+        if not admissions[key]["admittime"] <= time <= admissions[key]["dischtime"]:
+            continue
+        if (
+            followup_signals(row, details[order_id])
+            and followup_order_exclusion(row, admissions[key]) is None
+        ):
+            extras = sorted({" ".join(detail.split()) for detail in details[order_id]})
+            groups[key][FOLLOWUP_ORDERS].append(
+                (time, " | ".join([time, "Ordine POE", " ".join(poe_fields(row).split()), *extras]))
+            )
+            continue
+        label = (
+            (row["poe_id"],)
+            if full
+            else (
+                row["order_type"],
+                row["order_subtype"],
+                row["transaction_type"],
+                row["order_status"],
+            )
+        )
+        rank = time, row["poe_id"]
+        previous = orders[key].get(label)
+        if previous is None or rank > previous[0]:
+            orders[key][label] = rank, row
+
+    for key, entries in orders.items():
+        ordered = sorted(entries.values(), key=lambda entry: entry[0])
+        for _, row in ordered if full else ordered[-40:]:
+            time = row["ordertime"]
+            order_id = key[0], row["poe_id"]
+            if full:
+                extras = sorted({" ".join(detail.split()) for detail in details[order_id]})
+            else:
+                extras = sorted(
+                    detail
+                    for detail in details[order_id]
+                    if len(detail.split("field_value=", 1)[-1]) <= 240
+                    and "\n" not in detail
+                    and "\r" not in detail
+                )[:4]
+            groups[key][POE_ORDERS].append(
+                (time, " | ".join([time, "Ordine POE", poe_fields(row), *extras]))
+            )
+
+
+def microbiology_available(row, admission):
+    if row["charttime"] and row["storetime"]:
+        return during(row, admission, "charttime", "storetime")
+    # Senza orario, escludi i giorni di confine per evitare attribuzioni tardive.
+    return (
+        admission["admittime"][:10]
+        < row["chartdate"]
+        <= row["storedate"]
+        < admission["dischtime"][:10]
+    )
+
+
+def add_documented_events(hosp, admissions, groups, *, full=False):
     microbiology = defaultdict(list)
     for key, row in linked(hosp, "microbiologyevents", admissions):
         admission = admissions[key]
-        if row["charttime"] and row["storetime"]:
-            available = during(row, admission, "charttime", "storetime")
-        else:
-            # Senza orario, escludi i giorni di confine per evitare attribuzioni tardive.
-            available = (
-                admission["admittime"][:10]
-                < row["chartdate"]
-                <= row["storedate"]
-                < admission["dischtime"][:10]
-            )
-        if not available:
+        if not microbiology_available(row, admission):
             continue
         time = row["charttime"] or row["chartdate"]
         result = compact(
@@ -496,52 +786,10 @@ def add_documented_events(hosp, admissions, groups):
         )
         microbiology[key].append((time, f"{time} | Risultato di microbiologia | {result}"))
     for key, events in microbiology.items():
-        groups[key]["microbiologyevents"] = sorted(events)[-48:]
+        ordered = sorted(events)
+        groups[key]["microbiologyevents"] = ordered if full else ordered[-48:]
 
-    orders = defaultdict(dict)
-    for key, row in linked(hosp, "poe", admissions):
-        time = row["ordertime"]
-        if not admissions[key]["admittime"] <= time <= admissions[key]["dischtime"]:
-            continue
-        label = (
-            row["order_type"],
-            row["order_subtype"],
-            row["transaction_type"],
-            row["order_status"],
-        )
-        rank = time, row["poe_id"]
-        previous = orders[key].get(label)
-        if previous is None or rank > previous[0]:
-            orders[key][label] = rank, row
-
-    selected = {
-        (key[0], row["poe_id"]): (key, row)
-        for key, entries in orders.items()
-        for _, row in sorted(entries.values(), key=lambda entry: entry[0])[-40:]
-    }
-    details = defaultdict(set)
-    if selected:
-        for row in rows(hosp, "poe_detail", keys=selected, key_columns=("subject_id", "poe_id")):
-            value = row["field_value"]
-            if value and len(value) <= 240 and "\n" not in value and "\r" not in value:
-                details[row["subject_id"], row["poe_id"]].add(
-                    compact(row, "field_name", "field_value")
-                )
-    for order_id, (key, row) in selected.items():
-        time = row["ordertime"]
-        fields = compact(
-            row,
-            "poe_id",
-            "order_type",
-            "order_subtype",
-            "transaction_type",
-            "order_status",
-            "discontinue_of_poe_id",
-        )
-        extras = sorted(details[order_id])[:4]
-        groups[key]["poe + hosp/poe_detail"].append(
-            (time, " | ".join([time, "Ordine POE", fields, *extras]))
-        )
+    add_poe(hosp, admissions, groups, full=full)
 
     codes = {row["code"]: row for row in rows(hosp, "d_hcpcs")}
     for key, row in linked(hosp, "hcpcsevents", admissions):
@@ -560,30 +808,62 @@ def add_documented_events(hosp, admissions, groups):
         )
 
 
-def load_mimic(hosp: Path, notes: Path, *, limit: int, seed: int, ed=None, icu=None):
+def load_admissions(hosp):
+    return {
+        pair(row): {
+            field: row[field]
+            for field in (
+                "admittime",
+                "dischtime",
+                "admission_type",
+                "admission_location",
+                "discharge_location",
+            )
+        }
+        for row in rows(hosp, "admissions")
+        if row["admittime"] and row["admittime"] < row["dischtime"]
+    }
+
+
+def load_mimic(
+    hosp: Path,
+    notes: Path,
+    *,
+    limit: int,
+    seed: int,
+    ed=None,
+    icu=None,
+    min_discharge_cases=0,
+    min_complete_cases=0,
+    rich_pilot=False,
+):
     if not 1 <= limit <= MAX_CASES or seed < 0:
         raise ValueError(f"Usare da 1 a {MAX_CASES} ricoveri e un seed non negativo.")
     if (ed is None) != (icu is None):
         raise ValueError("Per il campione misto fornire entrambe le cartelle ED e ICU.")
+    if not 0 <= min_discharge_cases <= limit:
+        raise ValueError("--min-discharge-cases deve essere compreso tra 0 e --limit.")
+    max_complete = (limit + len(MIXED_PATHS) - 1) // len(MIXED_PATHS)
+    if not 0 <= min_complete_cases <= max_complete:
+        raise ValueError(f"--min-complete-cases deve essere compreso tra 0 e {max_complete}.")
+    if (min_discharge_cases or min_complete_cases or rich_pilot) and ed is None:
+        raise ValueError("I vincoli di copertura richiedono il campione misto con ED e ICU.")
     if ed is not None:
-        all_admissions = {
-            pair(row): {
-                field: row[field]
-                for field in (
-                    "admittime",
-                    "dischtime",
-                    "admission_type",
-                    "admission_location",
-                    "discharge_location",
-                )
-            }
-            for row in rows(hosp, "admissions")
-            if row["admittime"] and row["admittime"] < row["dischtime"]
-        }
+        all_admissions = load_admissions(hosp)
         ed_stays = index_stays(ed, "edstays", all_admissions)
         icu_stays = index_stays(icu, "icustays", all_admissions)
         references = mixed_cohort(
-            hosp, notes, all_admissions, ed_stays, icu_stays, limit=limit, seed=seed
+            hosp,
+            notes,
+            all_admissions,
+            ed_stays,
+            icu_stays,
+            limit=limit,
+            seed=seed,
+            min_discharge_cases=min_discharge_cases,
+            min_complete_cases=min_complete_cases,
+            rich_pilot=rich_pilot,
+            ed=ed,
         )
         admissions = {key: all_admissions[key] for key in references}
         ed_stays = {id_: entry for id_, entry in ed_stays.items() if entry[0] in admissions}
@@ -600,10 +880,47 @@ def load_mimic(hosp: Path, notes: Path, *, limit: int, seed: int, ed=None, icu=N
         raise ValueError("Associazione paziente e ricovero incompleta.")
 
     groups = defaultdict(lambda: defaultdict(list))
-    add_groups(hosp, notes, admissions, groups)
+    if rich_pilot:
+        logger.info("Estrazione estesa di Hosp e radiologia per %s ricoveri.", len(admissions))
+    add_groups(hosp, notes, admissions, groups, full=rich_pilot)
+    if sum(bool(group.get(DISCHARGE_ORDERS)) for group in groups.values()) < min_discharge_cases:
+        raise ValueError("Le fonti estratte non rispettano la quota di ordini di dimissione.")
     if ed is not None:
-        add_ed(ed, ed_stays, admissions, groups)
-        add_icu(icu, icu_stays, admissions, groups)
+        if rich_pilot:
+            logger.info("Estrazione degli eventi collegati di ED e ICU.")
+        add_ed(ed, ed_stays, admissions, groups, full=rich_pilot)
+        add_icu(icu, icu_stays, admissions, groups, full=rich_pilot)
+    if min_complete_cases:
+        complete_sources = (DISCHARGE_ORDERS, FOLLOWUP_ORDERS, "ed/edstays", "icu/icustays")
+        complete_count = sum(
+            all(group.get(origin) for origin in complete_sources) for group in groups.values()
+        )
+        if complete_count < min_complete_cases:
+            raise ValueError("Le fonti estratte non rispettano la quota di casi completi.")
+    display_names = {}
+    if rich_pilot:
+        case_numbers = Counter()
+        for key in sorted(admissions):
+            available = groups[key]
+            if all(
+                available.get(origin)
+                for origin in (DISCHARGE_ORDERS, FOLLOWUP_ORDERS, "ed/edstays", "icu/icustays")
+            ):
+                label = "Caso completo"
+            else:
+                label = {
+                    (True, True): "Caso ED e ICU",
+                    (True, False): "Caso ED",
+                    (False, True): "Caso ICU",
+                    (False, False): "Caso Hosp",
+                }[bool(available.get("ed/edstays")), bool(available.get("icu/icustays"))]
+            case_numbers[label] += 1
+            display_names[key] = (
+                label
+                if label == "Caso completo" and case_numbers[label] == 1
+                else f"{label} {case_numbers[label]}"
+            )
+
     prepared = {}
     for key, admission in sorted(admissions.items()):
         subject, hadm = key
@@ -618,7 +935,8 @@ def load_mimic(hosp: Path, notes: Path, *, limit: int, seed: int, ed=None, icu=N
         documents = [("contesto", "hosp/admissions + hosp/patients", header)]
         for table, entries in sorted(groups[key].items()):
             if table == "radiology":
-                for stored, chart, note_id, text in sorted(entries)[-6:]:
+                ordered = sorted(entries)
+                for stored, chart, note_id, text in ordered if rich_pilot else ordered[-6:]:
                     documents.append(
                         (
                             "referto_radiologico",
@@ -640,7 +958,9 @@ def load_mimic(hosp: Path, notes: Path, *, limit: int, seed: int, ed=None, icu=N
     digest = hashlib.sha256(
         json.dumps(
             [
-                MIXED_EXTRACTION if ed is not None else EXTRACTION,
+                (RICH_EXTRACTION if rich_pilot else MIXED_EXTRACTION)
+                if ed is not None
+                else EXTRACTION,
                 seed,
                 list(prepared.items()),
                 list(sorted(references.items())),
@@ -660,6 +980,8 @@ def load_mimic(hosp: Path, notes: Path, *, limit: int, seed: int, ed=None, icu=N
                 scope="episodio",
                 patient_id=subject,
                 episode_id=hadm,
+                display_name=display_names.get((subject, hadm)),
+                expanded_sources=rich_pilot,
                 limitations=(
                     "Dati MIMIC-IV deidentificati; date traslate e anchor_age riferita "
                     "ad anchor_year. "
@@ -668,13 +990,20 @@ def load_mimic(hosp: Path, notes: Path, *, limit: int, seed: int, ed=None, icu=N
                     "Campione retrospettivo. I codici ICD di ricovero sono codifica amministrativa "
                     "post-hoc e vanno distinti da diagnosi cliniche narrative. "
                     "La destinazione amministrativa non descrive le condizioni cliniche.",
-                    "Fonti selezionate: fino a 60 esami con prima misura e ultime due; eventi "
-                    "eMAR, microbiologia, ordini POE, farmaci, codici amministrativi e referti. "
-                    "Per eMAR, conservare lo stato documentato. Gli ordini di reparto non "
-                    "attestano somministrazione o prescrizione finale.",
+                    (
+                        "Archivio esteso degli eventi collegati e disponibili entro la dimissione."
+                        if rich_pilot
+                        else "Fonti selezionate: fino a 60 esami con prima misura e ultime due. "
+                        "Sono inclusi eventi eMAR, microbiologia, ordini POE, farmaci, codici "
+                        "amministrativi e referti."
+                    ),
+                    (
+                        "Per eMAR, conservare lo stato documentato. Gli ordini di reparto non "
+                        "attestano somministrazione o prescrizione finale."
+                    ),
                     "Gli ordini di dimissione espliciti provengono da Discharge Med attivi e "
-                    "verificati entro l'uscita, abbinati a prescriptions. Sono singoli ordini "
-                    "documentati e possono coprire solo una parte della terapia finale.",
+                    "verificati entro l'uscita, abbinati a prescriptions quando disponibile. "
+                    "Sono singoli ordini e possono coprire solo una parte della terapia finale.",
                     "La lettera originale è riservata al confronto. Terapia finale, istruzioni, "
                     "follow-up e stato istologico possono mancare nelle fonti.",
                 ),
@@ -693,4 +1022,4 @@ def load_mimic(hosp: Path, notes: Path, *, limit: int, seed: int, ed=None, icu=N
                 )
             )
         targets[context_id] = references[subject, hadm]
-    return contexts, sources, targets
+    return contexts, sorted(sources, key=lambda source: source.id), targets
