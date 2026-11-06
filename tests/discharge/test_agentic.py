@@ -363,14 +363,30 @@ def test_default_execution_has_no_total_deadline_and_propagates_nested_timeouts(
     asyncio.run(check())
 
 
-@pytest.mark.parametrize("first_result", ["read_ok", "analysis_ok", "schema_error", "read_error"])
-def test_large_context_reserves_the_next_response_for_final_text(
-    packet_factory, letter_factory, response_factory, monkeypatch, tmp_path, first_result
+@pytest.mark.parametrize(
+    ("first_result", "token_limit"),
+    [
+        ("read_ok", 120000),
+        ("analysis_ok", 120000),
+        ("schema_error", 120000),
+        ("read_error", 120000),
+        ("read_ok", None),
+    ],
+)
+def test_large_context_with_and_without_an_explicit_token_budget(
+    packet_factory,
+    letter_factory,
+    response_factory,
+    monkeypatch,
+    tmp_path,
+    first_result,
+    token_limit,
 ):
     from types import SimpleNamespace
 
     final = response_factory(letter_factory())
     requests = []
+    prompt_tokens = 40000 if token_limit else 70000
 
     class Stream(httpx.AsyncByteStream):
         def __init__(self, first):
@@ -401,13 +417,21 @@ def test_large_context_reserves_the_next_response_for_final_text(
                         ]
                     },
                     "tool_calls",
-                    {"prompt_tokens": 40000, "completion_tokens": 20, "total_tokens": 40020},
+                    {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": 20,
+                        "total_tokens": prompt_tokens + 20,
+                    },
                 )
             else:
                 yield chunk(
                     {"content": final},
                     "stop",
-                    {"prompt_tokens": 40000, "completion_tokens": 1000, "total_tokens": 41000},
+                    {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": 1000,
+                        "total_tokens": prompt_tokens + 1000,
+                    },
                 )
             yield b"data: [DONE]\n\n"
 
@@ -418,8 +442,12 @@ def test_large_context_reserves_the_next_response_for_final_text(
         if len(requests) == 2:
             assert body["tools"] == requests[0]["tools"]
             assert body["messages"][:2] == requests[0]["messages"]
-            assert body["messages"][-1]["role"] == "user"
-            assert "Fase finale obbligatoria" in body["messages"][-1]["content"]
+            final_control = body["messages"][-1]
+            if token_limit:
+                assert final_control["role"] == "user"
+                assert "Fase finale obbligatoria" in final_control["content"]
+            else:
+                assert final_control["role"] == "tool"
             assert "Dolore da tre giorni." in body["messages"][1]["content"]
             assert any(m["role"] == "assistant" and m.get("tool_calls") for m in body["messages"])
             results = [m for m in body["messages"] if m["role"] == "tool"]
@@ -444,7 +472,7 @@ def test_large_context_reserves_the_next_response_for_final_text(
     monkeypatch.setattr(api, "create_client", client)
     monkeypatch.setattr(
         "codice_tesi.discharge.generator.estimate_input_tokens",
-        lambda *a, **kw: SimpleNamespace(tokens=40000),
+        lambda *a, **kw: SimpleNamespace(tokens=prompt_tokens),
     )
     monkeypatch.setenv("TELEMETRY_ENABLED", "false")
     directory = asyncio.run(
@@ -456,18 +484,21 @@ def test_large_context_reserves_the_next_response_for_final_text(
                 text="Dolore da tre giorni.\n"
                 "2026-11-01 | Observation | Sodio | final | 139 mmol/L\n",
             ),
-            config=ModelConfig(thinking=False, tools_enabled=True),
+            config=ModelConfig(thinking=False, tools_enabled=True, total_tokens_limit=token_limit),
         )
     )
     report = json.loads((directory / "esito.json").read_text())
     assert report["stato"] == "bozza_da_revisionare" and len(requests) == 2
-    assert report["consumo"]["step_budgets"][1]["final_only_reason"] == "token_budget"
-    assert report["consumo"]["step_budgets"][1]["history_mode"] == "final_append"
-    assert report["consumo"]["metrics"]["total_tokens"] == 81020
+    mode = "final_append" if token_limit else "conversation"
+    assert report["consumo"]["step_budgets"][1]["final_only_reason"] == (
+        "token_budget" if token_limit else None
+    )
+    assert report["consumo"]["step_budgets"][1]["history_mode"] == mode
+    assert report["consumo"]["metrics"]["total_tokens"] == 2 * prompt_tokens + 1020
     for sample, body in zip(report["consumo"]["metrics"]["requests"], requests, strict=True):
         assert sample["request"]["max_tokens"] == body["max_tokens"]
         assert sample["request"]["tools_available"] == len(body.get("tools", []))
-    assert report["consumo"]["metrics"]["requests"][1]["request"]["history_mode"] == "final_append"
+    assert report["consumo"]["metrics"]["requests"][1]["request"]["history_mode"] == mode
     if first_result == "read_error":
         assert report["consumo"]["tools"]["calls"][0]["error_code"] == "unknown_evidence"
 

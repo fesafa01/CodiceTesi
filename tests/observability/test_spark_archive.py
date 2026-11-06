@@ -2,7 +2,7 @@ import io
 import json
 import os
 from shutil import rmtree
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -12,7 +12,7 @@ from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfi
 from codice_tesi.observability.spark import save_snapshot
 
 
-def test_archive_keeps_attempts_distinct_and_recovers_reference_after_restart(
+def test_archive_publishes_only_complete_current_runs_after_reference_is_available(
     tmp_path, monkeypatch
 ):
     output = tmp_path / "output"
@@ -23,7 +23,7 @@ def test_archive_keeps_attempts_distinct_and_recovers_reference_after_restart(
     metrics = {"input_tokens": 42, "output_tokens": 12, "reasoning_tokens": None}
     sample = {"t": 1, "gpu_utilization": 75}
 
-    def create_run(*, status, filename=None, text=None, dry_run=False):
+    def create_run(*, status, filename=None, text=None, dry_run=False, legacy=False, evidence=True):
         record = ExecutionRecord(
             runs,
             experiment=ExperimentConfig(),
@@ -35,7 +35,10 @@ def test_archive_keeps_attempts_distinct_and_recovers_reference_after_restart(
         directory.mkdir(parents=True)
         if filename:
             (directory / filename).write_text(text, encoding="utf-8")
+        if filename == "bozza.txt" and evidence:
+            (directory / "evidenze.md").write_text("Fonte sintetica", encoding="utf-8")
         record.finish(status, llm=metrics)
+        record.data["prompt_version"] = "fixture-prompt"
         record.data["telemetry"] = {"enabled": False}
         if not dry_run:
             hardware_path = f"spark/{record.path.stem}.json"
@@ -50,10 +53,14 @@ def test_archive_keeps_attempts_distinct_and_recovers_reference_after_restart(
                 "dataset_version": version,
                 "artifact_directory": directory.relative_to(runs).as_posix(),
             }
+            if not legacy:
+                record.data["test_spark"]["archive_version"] = spark_archive.ARCHIVE_VERSION
         record.save()
         return record.path.stem
 
     completed = create_run(status="completed", filename="bozza.txt", text="Bozza di prova")
+    for _ in range(4):
+        create_run(status="completed", filename="bozza.txt", text="Storica", legacy=True)
     create_run(status="prepared", dry_run=True)
 
     class EndScan(Exception):
@@ -73,16 +80,7 @@ def test_archive_keeps_attempts_distinct_and_recovers_reference_after_restart(
     monkeypatch.setattr(spark_archive, "urlopen", unavailable)
     scan_once()
     first = archive / "TEST-CASO-MIMIC-1"
-    sheet = spark_archive.read_json(first / "scheda.json")
-    assert sheet["run_id"] == completed
-    assert sheet["model"] == config.model
-    assert sheet["reasoning_enabled"] is False and sheet["reasoning_effort"] is None
-    assert sheet["tools_enabled"] is True
-    assert sheet["reference"] == {"status": "pending"}
-    assert (first / "bozza.txt").read_text() == "Bozza di prova"
-    report = spark_archive.read_json(first / "metriche.json")
-    assert report["token_e_stream"] == metrics
-    assert report["hardware_spark"]["samples_in_run"] == [sample]
+    assert list(archive.iterdir()) == []
 
     def reference(request, *, timeout):
         assert request.full_url == (
@@ -92,20 +90,74 @@ def test_archive_keeps_attempts_distinct_and_recovers_reference_after_restart(
         return io.BytesIO(json.dumps({"note_id": "note-1", "text": "Originale"}).encode())
 
     monkeypatch.setattr(spark_archive, "urlopen", reference)
-    failed = create_run(status="failed", filename="risposta.parziale.json", text="{")
     scan_once()
+    assert set(archive.iterdir()) == {first}
+    assert {file.name for file in first.iterdir()} == {
+        "bozza.txt",
+        "evidenze.md",
+        "lettera_ufficiale.txt",
+        "metriche.json",
+        "scheda.json",
+    }
+    sheet = spark_archive.read_json(first / "scheda.json")
+    assert sheet["run_id"] == completed
+    assert sheet["model"] == config.model
+    assert sheet["reasoning_enabled"] is False and sheet["reasoning_effort"] is None
+    assert sheet["tools_enabled"] is True
+    assert sheet["reference"]["status"] == "saved"
+    assert (first / "bozza.txt").read_text() == "Bozza di prova"
+    report = spark_archive.read_json(first / "metriche.json")
+    assert report["prompt_version"] == "fixture-prompt"
+    assert report["token_e_stream"] == metrics
+    assert report["hardware_spark"]["samples_in_run"] == [sample]
+
+    for status in ("failed", "interrupted", "running"):
+        create_run(status=status, filename="bozza.txt", text="Artefatto di prova")
+    create_run(status="completed", filename="risposta.parziale.json", text="{")
+    create_run(status="completed", filename="bozza.txt", text="")
+    create_run(status="completed", filename="bozza.txt", text="Senza fonti", evidence=False)
+    scan_once()
+    scan_once()
+    assert set(archive.iterdir()) == {first}
+    assert (first / "lettera_ufficiale.txt").read_text() == "Originale"
+
+    another = create_run(status="completed", filename="bozza.txt", text="Seconda bozza")
     scan_once()
     second = archive / "TEST-CASO-MIMIC-2"
     assert set(archive.iterdir()) == {first, second}
-    assert (first / "lettera_ufficiale.txt").read_text() == "Originale"
-    assert (second / "risposta.parziale.json").read_text() == "{"
+    assert (second / "bozza.txt").read_text() == "Seconda bozza"
     sheet = spark_archive.read_json(second / "scheda.json")
-    assert sheet["run_id"] == failed and sheet["status"] == "failed"
+    assert sheet["run_id"] == another and sheet["status"] == "completed"
     assert sheet["reference"]["note_id"] == "note-1"
+
+    def missing_reference(request, *, timeout):
+        raise HTTPError(request.full_url, 404, "Originale assente", None, None)
+
+    create_run(status="completed", filename="bozza.txt", text="Senza originale")
+    monkeypatch.setattr(spark_archive, "urlopen", missing_reference)
+    scan_once()
+    assert set(archive.iterdir()) == {first, second}
+
+    legacy = archive / "TEST-CASO-MIMIC-3"
+    legacy.mkdir()
+    save_snapshot(
+        legacy / "scheda.json",
+        {
+            **sheet,
+            "run_id": "legacy-failed",
+            "status": "failed",
+            "draft_file": None,
+            "reference": {"status": "pending"},
+        },
+    )
+    scan_once()
+    assert spark_archive.read_json(legacy / "scheda.json")["reference"] == {"status": "pending"}
+    monkeypatch.setattr(spark_archive, "urlopen", reference)
 
     # Un ripristino dell'archivio riparte da 1 e ignora i record precedenti.
     rmtree(first)
     rmtree(second)
+    rmtree(legacy)
     marker = archive / spark_archive.RESET_MARKER
     marker.touch()
     reset_at = marker.stat().st_mtime_ns

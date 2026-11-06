@@ -123,9 +123,9 @@ def test_generation_uses_preloaded_packet_and_publishes_validated_result(
     assert "Testo di fixture" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("invalid_json", [False, True])
-def test_invalid_draft_does_not_become_a_letter(
-    web_client, monkeypatch, letter_factory, response_factory, invalid_json
+@pytest.mark.parametrize("variant", ["invalid_citation", "truncated", "no_sections"])
+def test_web_saves_recoverable_text_from_invalid_drafts(
+    web_client, monkeypatch, letter_factory, response_factory, variant
 ):
     client, _, _ = web_client
 
@@ -138,21 +138,32 @@ def test_invalid_draft_does_not_become_a_letter(
 
         async def stream(self, request):
             response = response_factory(letter_factory())
-            if invalid_json:
-                yield response.rstrip() + "}"
+            if variant == "no_sections":
+                yield '{"sections":'
+            elif variant == "truncated":
+                yield response[: response.index("Testo di fixture.") + len("Testo di fixture.")]
             else:
-                yield response.replace("evidenza-0001", "inventata")
+                yield response.replace("evidenza-0001", "inventata", 1)
 
     monkeypatch.setattr(application, "LLMDraftGenerator", Generator)
     path = prepare(client)
     client.post(path + "/genera")
     result = wait_result(client, path)
-    assert result["status"] == "failed" and "result" not in result
-    assert result["failure_code"] == (
-        "invalid_draft_json" if invalid_json else "invalid_draft_contract"
-    )
+    if variant == "no_sections":
+        assert result["status"] == "failed" and "result" not in result
+        assert result["failure_code"] == "invalid_draft_json"
+        return
+    assert result["status"] == "completed"
+    assert result["result"]["validation"]["technical"] == "failed"
+    sections = result["result"]["draft"]["sections"]
+    assert sections[0]["text"] == "Testo di fixture." and sections[0]["sources"] == []
+    if variant == "invalid_citation":
+        assert any(section["sources"] for section in sections[1:])
+    else:
+        assert all(not section["text"] for section in sections[1:])
     assert client.get(path + "/fonti/source-0").status_code == 200
-    assert client.post(path + "/genera").json()["status"] == "failed"
+    assert client.get(path).json()["result"]["draft"]["sections"] == sections
+    assert client.post(path + "/genera").json()["status"] == "completed"
 
 
 def test_restart_preserves_snapshot_and_marks_running_as_interrupted(tmp_path, web_client):
@@ -428,12 +439,24 @@ def test_response_reset_and_failure_keep_only_the_last_partial(web_client, monke
         ("final", "tool_call_after_final"),
         ("protocol", "model_protocol_error"),
         ("usage", "model_usage_limit"),
+        ("provider_http", "model_http_error"),
+        ("connection", "model_connection_error"),
+        ("transport_timeout", "model_transport_timeout"),
+        ("provider_api", "model_api_error"),
+        ("internal", "generation_internal_error"),
     ],
 )
 def test_generation_failures_are_specific_without_exposing_model_content(
     web_client, monkeypatch, kind, code
 ):
-    from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+    from httpx2 import Request
+    from openai import APIConnectionError, APITimeoutError
+    from pydantic_ai.exceptions import (
+        ModelAPIError,
+        ModelHTTPError,
+        UnexpectedModelBehavior,
+        UsageLimitExceeded,
+    )
 
     from codice_tesi.discharge.limits import (
         EvidenceReadError,
@@ -452,7 +475,21 @@ def test_generation_failures_are_specific_without_exposing_model_content(
             raise FinalPhaseToolCallError("leggi_evidenze")
         if kind == "protocol":
             raise UnexpectedModelBehavior("PRIVATE_MODEL_CONTENT")
-        raise UsageLimitExceeded("PRIVATE_MODEL_CONTENT")
+        if kind == "usage":
+            raise UsageLimitExceeded("PRIVATE_MODEL_CONTENT")
+        if kind == "provider_http":
+            raise ModelHTTPError(503, "fixture", body={"error": "PRIVATE_MODEL_CONTENT"})
+        if kind in {"connection", "transport_timeout"}:
+            request = Request("POST", "http://serving.invalid")
+            error = (
+                APITimeoutError(request)
+                if kind == "transport_timeout"
+                else APIConnectionError(request=request)
+            )
+            raise ModelAPIError("fixture", "PRIVATE_MODEL_CONTENT") from error
+        if kind == "provider_api":
+            raise ModelAPIError("fixture", "PRIVATE_MODEL_CONTENT")
+        raise RuntimeError("PRIVATE_MODEL_CONTENT")
 
     monkeypatch.setattr("codice_tesi.web_api.app.run_application", run)
     path = prepare(client)
@@ -461,6 +498,8 @@ def test_generation_failures_are_specific_without_exposing_model_content(
     assert result["status"] == "failed" and result["failure_code"] == code
     assert "PRIVATE_MODEL_CONTENT" not in json.dumps(result)
     assert "Verificare il serving LLM" not in result["detail"]
+    if kind == "provider_http":
+        assert "HTTP 503" in result["detail"]
 
 
 def test_agent_api_import_does_not_load_sql_backend_or_driver():
@@ -484,8 +523,9 @@ def test_agent_api_import_does_not_load_sql_backend_or_driver():
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize("variant", ["no_histology", "incomplete", "histology", "recovered"])
 def test_web_generation_archives_provider_usage_and_cited_sources(
-    tmp_path, monkeypatch, packet_factory, letter_factory, response_factory
+    tmp_path, monkeypatch, packet_factory, letter_factory, response_factory, variant
 ):
     from io import StringIO
 
@@ -494,6 +534,7 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
 
     from codice_tesi import api
     from codice_tesi.discharge.models import MIMIC_DATASET
+    from codice_tesi.discharge.template import MISSING_VALUE
     from codice_tesi.observability import spark_archive
 
     token = "x" * 43
@@ -524,12 +565,36 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
         assert kwargs["context_id"] == packet.context.id
         return packet
 
-    draft = response_factory(letter_factory())
+    incomplete = variant == "incomplete"
+    histology = variant == "histology"
+    recovered = variant == "recovered"
+    thinking = incomplete or histology
+    letter = letter_factory(answer="Sì", details="Dettagli.") if histology else letter_factory()
+    draft = response_factory(letter)
+    if recovered:
+        response = json.loads(draft)
+        response["sections"][2].update(text="Testo della terza sezione.", sources="formato errato")
+        draft = json.dumps(response)
+    if incomplete:
+        response = json.loads(response_factory(letter_factory(answer="Sì", details="Dettagli.")))
+        response["sections"] = [
+            section
+            for section in response["sections"]
+            if section["section_id"]
+            not in {"terapia_dimissione", "programma_followup", "informazioni_istologico"}
+        ]
+        for section in response["sections"]:
+            if section["section_id"] == "decorso":
+                section.update(text="Conclusione senza fonte.", sources=[])
+        draft = json.dumps(response, ensure_ascii=False)
 
     def handle_completion(request):
         body = json.loads(request.content)
         assert request.url.path == "/v1/chat/completions"
-        assert body["model"] == QWEN_MODEL and body["reasoning_effort"] == "low"
+        assert body["model"] == QWEN_MODEL
+        assert body["reasoning_effort"] == ("low" if thinking else "none")
+        assert not body.get("tools")
+        assert "leggi_evidenze" not in json.dumps(body["messages"])
         events = [
             {"choices": [{"index": 0, "delta": {"content": draft}, "finish_reason": "stop"}]},
             {
@@ -574,13 +639,47 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
         prepared = client.post("/api/v1/preparazioni", json={"context_id": packet.context.id})
         assert prepared.status_code == 201
         path = f"/api/v1/preparazioni/{prepared.json()['id']}"
-        assert client.post(path + "/genera").status_code == 202
+        preparation = client.get(path).json()
+        assert len(preparation["packet"]["template"]["sections"]) == 17
+        assert len(preparation["visible_section_ids"]) == 14
+        assert (
+            client.post(
+                path + "/genera", json={"thinking": thinking, "tools_enabled": False}
+            ).status_code
+            == 202
+        )
         state = wait_result(client, path)
         assert state["status"] == "completed", state
 
     record_path = run_output / "registro" / f"{state['run_id']}.json"
     record = json.loads(record_path.read_text())
     artifacts = run_output / record["test_spark"]["artifact_directory"]
+    sections = state["result"]["draft"]["sections"]
+    assert [section["section_id"] for section in sections] == [
+        definition.id for definition in packet.template.sections
+    ]
+    visible = state["visible_section_ids"]
+    by_id = {section["section_id"]: section for section in sections}
+    assert by_id["medici"] == {"section_id": "medici", "text": "", "sources": []}
+    assert "medici" not in visible
+    assert {"terapia_dimissione", "programma_followup"} <= set(visible)
+    if recovered:
+        assert state["result"]["validation"]["technical"] == "failed"
+        assert sections[2]["text"] == "Testo della terza sezione." and sections[2]["sources"] == []
+    issues = state["result"]["facts"]["issues"]
+    assert {"terapia_dimissione", "programma_followup"} <= {issue["section_id"] for issue in issues}
+    assert ("istologico_in_attesa" in visible) is (incomplete or histology)
+    assert ("informazioni_istologico" in visible) is histology
+    if incomplete:
+        missing = ["decorso", "terapia_dimissione", "informazioni_istologico"]
+        for key in missing:
+            text = "" if key == "terapia_dimissione" else MISSING_VALUE
+            assert by_id[key] == {"section_id": key, "text": text, "sources": []}
+        assert by_id["programma_followup"]["text"] == ""
+        assert by_id["istologico_in_attesa"]["text"] == "Sì"
+        report = json.loads((artifacts / "esito.json").read_text())
+        assert report["sezioni_da_completare"] == missing
+        assert (artifacts / "risposta.parziale.json").read_text() == draft
 
     class EndScan(Exception):
         pass
@@ -605,8 +704,10 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
     assert set(sheet["artifact_files"]) == files
     assert sheet["run_id"] == state["run_id"]
     assert sheet["model"] == QWEN_MODEL and sheet["response_model"] == "fixture-model-revision"
-    assert sheet["reasoning_effort"] == "low" and sheet["tools_enabled"] is False
+    assert sheet["reasoning_enabled"] is thinking and sheet["tools_enabled"] is False
+    assert sheet["reasoning_effort"] == ("low" if thinking else None)
     assert sheet["draft_file"] == "bozza.txt"
+    assert sheet["draft_technical_validation"] == ("failed" if recovered else "passed")
     assert sheet["reference"]["status"] == "saved"
     assert set(p.name for p in case.iterdir()) == files | {
         "scheda.json",
@@ -617,10 +718,17 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
         assert (case / name).read_bytes() == (artifacts / name).read_bytes()
     assert (case / "lettera_ufficiale.txt").read_text() == "Originale sintetico"
     evidence = (case / "evidenze.md").read_text()
+    archived_draft = (case / "bozza.txt").read_text()
+    assert ("CONTROLLI TECNICI NON SUPERATI" in archived_draft) is recovered
+    for content in (evidence, archived_draft):
+        assert "Specializzando e altro medico" not in content
+        assert ("In attesa di esame istologico" in content) is (incomplete or histology)
+        assert ("Informazioni sull’istologico" in content) is histology
     assert "## 1. " + packet.template.sections[0].title in evidence
     assert packet.sources[0].text in evidence
     assert state["result"]["draft"]["sections"][0]["sources"][0]["evidence_ids"][0] in evidence
     metrics = json.loads((case / "metriche.json").read_text())
+    assert metrics["draft_technical_validation"] == sheet["draft_technical_validation"]
     assert metrics["token_e_stream"] == record["llm"]
     assert metrics["token_e_stream"]["input_tokens"] == 42
     assert metrics["token_e_stream"]["output_tokens"] == 12

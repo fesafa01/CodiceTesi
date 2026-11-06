@@ -97,8 +97,8 @@ class LLMDraftGenerator:
         final_control = (
             "# Fase finale obbligatoria\n"
             "Scrivi adesso la bozza completa. La prossima azione deve essere la risposta "
-            "finale JSON, non una chiamata a strumenti. Tutte le fonti originali e gli ID "
-            "citabili sono già nel catalogo iniziale; usa anche i risultati già ricevuti. "
+            "finale JSON, non una chiamata a strumenti. Cita i passaggi ricevuti nel "
+            "catalogo iniziale o attraverso i risultati degli strumenti. "
             "Non servono altre letture o verifiche. Gli strumenti sono chiusi. "
             'Inizia direttamente con {"sections":[ e termina con ]}, includendo le 17 '
             "sezioni nell'ordine previsto, senza premesse o Markdown. "
@@ -108,20 +108,27 @@ class LLMDraftGenerator:
         def budget_for_step(ctx):
             if ctx.run_step in step_plans:
                 return step_plans[ctx.run_step]
-            # Controlla la crescita della storia prima di ogni richiesta al server.
+            # Stima il contesto reinviato per il registro e per eventuali limiti espliciti.
             history = ModelMessagesTypeAdapter.dump_json(
                 ctx.messages[1:], exclude={"__all__": {"instructions"}}
             ).decode()
             estimate = estimate_input_tokens(
                 request.instructions, request.prompt + "\n" + history, self.config
             ).tokens
-            remaining = self.config.total_tokens_limit - ctx.usage.total_tokens - estimate - 8192
-            # Ogni nuovo giro reinvia la storia: conserva spazio per una risposta
-            # finale quando non è sostenibile un'altra lettura seguita da un LLM.
+            token_limit = self.config.total_tokens_limit
+            remaining = (
+                token_limit - ctx.usage.total_tokens - estimate - 8192
+                if token_limit is not None
+                else None
+            )
+            # Un tetto aggregato esplicito lascia spazio alla risposta finale.
             final_reason = None
             if ctx.usage.requests + 1 >= self.config.max_requests:
                 final_reason = "request_limit"
-            elif remaining < estimate + min(self.config.max_tokens, 8192) + 8192:
+            elif (
+                remaining is not None
+                and remaining < estimate + min(self.config.max_tokens, 8192) + 8192
+            ):
                 final_reason = "token_budget"
             if final_reason:
                 estimate = estimate_input_tokens(
@@ -129,17 +136,16 @@ class LLMDraftGenerator:
                     request.prompt + "\n" + history + "\n" + final_control,
                     self.config,
                 ).tokens
-                remaining = (
-                    self.config.total_tokens_limit - ctx.usage.total_tokens - estimate - 8192
-                )
-            if (
+                if token_limit is not None:
+                    remaining = token_limit - ctx.usage.total_tokens - estimate - 8192
+            if request.window_tokens is not None and (
                 estimate + self.config.max_tokens + request.safety_margin_tokens + 8192
                 > request.window_tokens
             ):
                 raise UsageLimitExceeded(
                     "Storia agentica oltre il budget di contesto; nessuna fonte troncata."
                 )
-            if remaining <= 0:
+            if remaining is not None and remaining <= 0:
                 raise UsageLimitExceeded(
                     "Budget aggregato di token esaurito prima della nuova richiesta."
                 )
@@ -160,7 +166,8 @@ class LLMDraftGenerator:
         def settings_for_step(ctx):
             estimate, remaining, final_reason = budget_for_step(ctx)
             settings = dict(self.settings)
-            settings["max_tokens"] = min(self.config.max_tokens, remaining)
+            if remaining is not None:
+                settings["max_tokens"] = min(self.config.max_tokens, remaining)
             if final_reason:
                 self.progress["fase"] = "redazione_finale"
             elif self.config.model in OLLAMA_MODELS:

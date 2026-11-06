@@ -192,7 +192,7 @@ export default function LetterPage({
     }
 	function download() {
 		if (!job || !preparation) return;
-		const text = letterText(preparation.packet.template.sections, edits, job);
+		const text = letterText(sections, edits, job);
 		const url = URL.createObjectURL(
 			new Blob([text], { type: "text/plain;charset=utf-8" }),
 		);
@@ -219,10 +219,19 @@ export default function LetterPage({
 		);
 	const { packet } = preparation;
 	const catalog = job.result?.catalog ?? preparation.catalog;
-	const definition = packet.template.sections.find((s) => s.id === active)!;
-	const draft = job.result?.draft.sections.find((s) => s.section_id === active);
+	const visibleIds = job.visible_section_ids ?? preparation.visible_section_ids;
+    const sections = packet.template.sections.filter((section) => !visibleIds || visibleIds.includes(section.id));
+    const definition = sections.find((s) => s.id === active) ?? sections[0];
+    const selected = definition.id;
+	const draft = job.result?.draft.sections.find((s) => s.section_id === selected);
 	const busy = starting || ["running", "cancelling"].includes(job.status);
     const inventory = job.result?.facts ?? preparation.facts;
+    const reviewIssues = (preparation.facts ?? inventory)?.issues ?? [];
+    const recoveredDraft = job.result?.validation.technical === "failed";
+    const issues = [
+        ...(inventory?.issues ?? []).filter((issue) => !issue.section_id),
+        ...reviewIssues.filter((issue) => issue.section_id === selected),
+    ];
 	const terminalError = job.status === "failed" || job.status === "interrupted";
 	const sourceURL = (sourceId: string) =>
 		`/degenze/${id}/fonti/${encodeURIComponent(sourceId)}`;
@@ -291,7 +300,7 @@ export default function LetterPage({
 					</Link>
 					<h1>Lettera di dimissione</h1>
 					<p>
-						{packet.context.id}{" "}
+						{packet.context.display_name ?? packet.context.id}{" "}
 						<span className="separator">/</span> Template Campus{" "}
 						{packet.template.version}
 					</p>
@@ -301,7 +310,7 @@ export default function LetterPage({
                         <button onClick={cancel} className="button secondary">Interrompi</button>
                     )}
 						<button onClick={download} className="button secondary"
-                            disabled={!packet.template.sections.some((s) => sectionText(s.id, edits, job).trim())}>
+                            disabled={!sections.some((s) => sectionText(s.id, edits, job).trim())}>
 							<FiDownload /> Scarica bozza
 						</button>
 					<button
@@ -363,7 +372,7 @@ export default function LetterPage({
 					<strong>Stato</strong>
 					<span className="status-pill">
 						{job.result
-							? "Bozza da revisionare"
+							? (recoveredDraft ? "Bozza recuperata" : "Bozza da revisionare")
 							: busy
 								? "In elaborazione"
 								: terminalError
@@ -378,6 +387,11 @@ export default function LetterPage({
 				</div>
 			)}
             {connectionError && <div className="error" role="alert">{connectionError}</div>}
+            {recoveredDraft && (
+                <div className="notice" role="status">
+                    Bozza salvata. Controlli tecnici non superati. Verifica testo e fonti prima dell’uso.
+                </div>
+            )}
 			{terminalError && (
 				<div className="error" role="alert">
 					{job.detail}{" "}
@@ -406,7 +420,7 @@ export default function LetterPage({
 							<FiFileText /> Bozza della lettera
 							</h2>
 							<p>
-								{packet.template.sections.length} sezioni · Seleziona una
+								{sections.length} sezioni · Seleziona una
 								sezione per consultarne le fonti · Testo modificabile
 							</p>
 						</div>
@@ -415,22 +429,25 @@ export default function LetterPage({
 						</span>
 					</div>
 					<div className="letter-sections">
-						{packet.template.sections.map((s, i) => {
+						{sections.map((s, i) => {
 							const generated = job.result?.draft.sections.find(
 								(d) => d.section_id === s.id,
 							);
                             const incoming = job.preview?.sections.find((d) => d.section_id === s.id);
                             const manual = Object.hasOwn(edits, s.id);
+                            const needsReview = generated?.text === "" && (
+                                s.id === "terapia_dimissione" || reviewIssues.some((issue) => issue.section_id === s.id)
+                            );
                             const writing = busy && !!incoming && job.preview?.sections[job.preview.sections.length - 1]?.section_id === s.id;
 							return (
 								<article
 									key={s.id}
-									className={`letter-section ${active === s.id ? "is-active" : ""} ${writing ? "is-streaming" : ""}`}
+									className={`letter-section ${selected === s.id ? "is-active" : ""} ${writing ? "is-streaming" : ""}`}
 								>
 									<button
 										className="section-heading"
 										onClick={() => setActive(s.id)}
-										aria-pressed={active === s.id}
+										aria-pressed={selected === s.id}
 									>
 										<span className="section-number">
 											{String(i + 1).padStart(2, "0")}
@@ -444,7 +461,7 @@ export default function LetterPage({
 									<div className="section-body">
                                         <div className="section-editor-meta">
                                             <span className={writing ? "stream-badge" : "muted"}>
-                                                {manual ? "Testo modificato a mano" : generated ? "Testo generato" : writing ? "In scrittura…" : incoming ? "Testo ricevuto · provvisorio" : "Da compilare"}
+                                                {manual ? "Testo modificato a mano" : needsReview ? "Da verificare" : generated ? "Testo generato" : writing ? "In scrittura…" : incoming ? "Testo ricevuto · provvisorio" : "Da compilare"}
                                             </span>
                                             {manual && <button className="text-button" onClick={() => setEdits((current) => {
                                                 const next = { ...current }; delete next[s.id]; return next;
@@ -488,10 +505,10 @@ export default function LetterPage({
 						</div>
 					</div>
 					<div className="evidence-body">
-                        {inventory && inventory.issues.length > 0 && (
+                        {issues.length > 0 && (
                             <div className="documentary-issues">
-                                <h3>Informazioni da verificare nelle fonti</h3>
-                                {inventory.issues.map((issue, index) => (
+                                <h3>Avvisi per il medico</h3>
+                                {issues.map((issue, index) => (
                                     <p key={index}>{issue.message}{" "}
                                         {issue.evidence_ids.map((eid) => {
                                             const ev = catalog.evidences.find((e) => e.id === eid);
@@ -522,10 +539,11 @@ export default function LetterPage({
 									Fonti citate dal modello per questa sezione.
 								</p>
 								{citations(draft)}
-                                {Object.hasOwn(edits, active) && <p className="trace-note">Le citazioni si riferiscono al testo AI originale; le modifiche manuali richiedono una nuova verifica delle fonti.</p>}
+                                {Object.hasOwn(edits, selected) && <p className="trace-note">Le citazioni si riferiscono al testo AI originale; le modifiche manuali richiedono una nuova verifica delle fonti.</p>}
 								<p className="trace-note">
-									Riferimenti controllati tecnicamente. Pertinenza e correttezza
-									clinica da revisionare.
+									{recoveredDraft
+                                        ? "Bozza recuperata. Verifica il testo e i riferimenti disponibili."
+                                        : "Riferimenti controllati tecnicamente. Pertinenza e correttezza clinica da revisionare."}
 								</p>
 							</>
 						) : (

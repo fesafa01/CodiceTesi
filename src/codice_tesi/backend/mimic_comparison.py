@@ -7,7 +7,7 @@ from textwrap import indent
 
 from codice_tesi.backend.database import Database
 from codice_tesi.discharge.models import MIMIC_DATASET
-from codice_tesi.discharge.provenance import TraceResult, render_draft
+from codice_tesi.discharge.provenance import TraceResult, render_draft, visible_sections
 from codice_tesi.discharge.template import load_template
 
 # Le intestazioni forniscono piste di revisione, non equivalenze cliniche.
@@ -40,7 +40,6 @@ PAIRING = {
     ),
     "istologico_in_attesa": ("Pending Results", "Pending Tests", "Pending Studies"),
     "informazioni_istologico": ("Pending Results", "Pending Tests", "Pending Studies"),
-    "medici": ("Attending",),
 }
 HEADERS = sorted({header for aliases in PAIRING.values() for header in aliases})
 HEADER_PATTERN = re.compile(
@@ -94,7 +93,8 @@ async def compare_mimic(database: Database, draft_path: Path, destination: Path)
         binding.dataset.id != MIMIC_DATASET
         or draft.validation.technical != "passed"
         or binding.template.sha256 != template.sha256
-        or [section.section_id for section in draft.draft.sections] != list(PAIRING)
+        or [section.section_id for section in draft.draft.sections]
+        != [s.id for s in template.sections]
     ):
         raise ValueError("Serve una bozza MIMIC validata con il template Campus corrente.")
 
@@ -106,7 +106,7 @@ async def compare_mimic(database: Database, draft_path: Path, destination: Path)
     headers = mapped_headers(note["text"])
     checklist = "\n".join(
         f"| {section.title} | {', '.join(headers[section.id]) or '—'} |"
-        for section in template.sections
+        for section in visible_sections(template, draft.draft, dataset=MIMIC_DATASET)
     )
     content = (
         "# Confronto locale CAMPUS / MIMIC-IV-Note\n\n"
@@ -119,7 +119,7 @@ async def compare_mimic(database: Database, draft_path: Path, destination: Path)
         "|---|---|\n"
         f"{checklist}\n\n"
         "## Bozza CAMPUS in italiano\n\n"
-        + indent(render_draft(draft.draft, template), "    ")
+        + indent(render_draft(draft.draft, template, dataset=MIMIC_DATASET), "    ")
         + "\n\n## Lettera originale MIMIC in inglese\n\n"
         + indent(note["text"], "    ")
         + "\n"

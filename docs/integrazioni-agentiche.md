@@ -139,16 +139,14 @@ La UI distingue `tool_call_invalid`, `model_protocol_error` e `model_usage_limit
 dagli errori di inattività o durata totale. Il messaggio generico rimane solo
 per errori non classificati.
 
-La storia viene stimata nuovamente prima di ogni richiesta, con riserva per gli
-schemi dei tool, output e margine; se eccede il budget, il lavoro si arresta.
-Il massimo output viene ridotto quando necessario in base al budget aggregato
-residuo stimato. La verifica dei token effettivi rimane legata all'usage fornito
-dal serving, che può arrivare soltanto dopo una richiesta.
-Se non c'è spazio per un'altra lettura seguita da una risposta finale, oppure
-si arriva all'ultima richiesta consentita, l'applicazione aggiunge un messaggio
-`# Fase finale obbligatoria` in coda. System, fonti, schemi dei tool, ID delle
-chiamate e risultati originali restano invariati. La modalità è `final_append`,
-con `prefix_strategy=append_only`: non viene ricostruita o ripulita la storia.
+La storia viene stimata prima di ogni richiesta per il registro. Il flusso web
+usa il catalogo completo e il serving applica la propria finestra. I chiamanti
+Python possono imporre esplicitamente una finestra o un tetto cumulativo di token.
+In quel caso i controlli riservano spazio per schemi e risposta. All’ultima
+richiesta consentita, o quando un tetto cumulativo esplicito lascia spazio solo
+alla stesura, l’applicazione aggiunge `# Fase finale obbligatoria` in coda.
+System, fonti, schemi dei tool, ID delle chiamate e risultati originali
+restano nella storia, con `prefix_strategy=append_only`.
 
 Il vincolo della fase finale è dichiarato nelle istruzioni statiche fin dalla
 prima richiesta. Gli schemi restano disponibili per conservare il prefisso,
@@ -160,11 +158,9 @@ nella fase finale interrompono il ciclo, senza ulteriori correzioni.
 Questo dettaglio conta con ds4.c: nel renderer pubblico gli schemi precedono il
 system e `tool_choice=none` li esclude dal prompt. Perciò rimuoverli o cambiare
 le istruzioni prima delle fonti può perdere l'intero prefisso. Il percorso
-ordinario conserva gli schemi e non forza `none` durante la fase finale. Il
-budget continua a includere schemi, storia completa, output e margine; viene
-calcolato una volta per passo. Non vengono eliminate fonti o ampliati i limiti.
-La scelta è registrata in `step_budgets[].final_only_reason`; il budget non viene
-aumentato e non vengono eliminate fonti. Gli errori documentali attesi hanno
+ordinario conserva gli schemi e non forza `none` durante la fase finale.
+Il motivo del passaggio alla fase finale è registrato in
+`step_budgets[].final_only_reason`. Gli errori documentali attesi hanno
 codici specifici (`unknown_evidence`, `result_budget`, ecc.) e possono essere
 restituiti al modello come feedback entro la medesima correzione consentita.
 

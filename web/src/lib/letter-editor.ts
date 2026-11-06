@@ -13,7 +13,9 @@ export function sameEdits(a: Record<string, string>, b: Record<string, string>):
 }
 
 export function letterText(sections: Section[], edits: Record<string, string>, job: Job): string {
-    const partial = job.status !== "completed" ? " — GENERAZIONE NON COMPLETATA" : "";
+    const partial = job.result?.validation.technical === "failed"
+        ? " — CONTROLLI TECNICI NON SUPERATI"
+        : job.status !== "completed" ? " — GENERAZIONE NON COMPLETATA" : "";
     return `BOZZA DI LETTERA DI DIMISSIONE — DA REVISIONARE${partial}\n\n`
         + sections.map((s, i) => `${i + 1}. ${s.title}\n${sectionText(s.id, edits, job)}\n`).join("\n");
 }

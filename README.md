@@ -44,9 +44,10 @@ bozza con la relativa lettera sono descritti in [MIMIC e CAMPUS](docs/mimic-camp
 Il [catalogo dei dataset](docs/dataset-mimic.md) include il comando per scaricare ICU.
 
 L'interfaccia web usa `qwen3.8:27b` per impostazione predefinita.
-Per usare Gemma, aggiungere o sostituire `LLM_MODEL=gemma4:31b` in `.env`.
-Entrambi usano l'endpoint Ollama del DGX Spark (porta `11434`). Per applicare la
-modifica all'interfaccia web, usare `docker compose up -d --build agent-api`.
+Per usare Gemma o Mistral, impostare `LLM_MODEL=gemma4:31b` oppure
+`LLM_MODEL=frob/mistral-small-4:119b` in `.env`. I tre modelli usano
+l'endpoint Ollama del DGX Spark (porta `11434`). Per applicare la modifica
+all'interfaccia web, usare `docker compose up -d --build agent-api`.
 Per tornare a Qwen, impostare `LLM_MODEL=qwen3.8:27b`. Per usare il serving
 DeepSeek, impostare `LLM_MODEL=deepseek-v4-flash`.
 
@@ -57,6 +58,11 @@ attivo rinnova il limite di inattività. `LLM_OLLAMA_BASE_URL` configura l'endpo
 Ollama. `LLM_BASE_URL` e `LLM_API_KEY` configurano il serving DeepSeek.
 `LLM_TIMEOUT` vale per entrambi.
 
+CAMPUS invia tutti i passaggi del catalogo e registra la stima dei token.
+La finestra effettiva è configurata sul serving. Per Ollama, verificarla
+sullo Spark con `ollama ps` a modello caricato.
+[Configurazione del contesto](https://docs.ollama.com/context-length)
+
 Gli esiti sono in
 `$TESI_PRIVATE_DIR/output/dimissioni-mimic/<contesto>/<esecuzione>/` per MIMIC;
 la sottocartella `registro/` contiene
@@ -66,23 +72,26 @@ delle affermazioni resta da valutare.
 
 ### Archivio delle prove MIMIC
 
-Lo stack web archivia i nuovi tentativi MIMIC in `$TESI_PRIVATE_DIR/TEST-SPARK/TEST-CASO-MIMIC-1/`,
-`TEST-CASO-MIMIC-2/` e così via. Il numero identifica il tentativo. Dopo una
-generazione riuscita e il recupero dell’originale, la cartella contiene cinque file.
+Lo stack web archivia i nuovi run MIMIC completati in `$TESI_PRIVATE_DIR/TEST-SPARK/TEST-CASO-MIMIC-1/`,
+`TEST-CASO-MIMIC-2/` e così via. La cartella compare quando la bozza validata,
+le evidenze, l’originale e le metriche sono tutti disponibili. Contiene cinque file.
 
 - `bozza.txt` contiene la bozza validata.
 - `evidenze.md` riporta le fonti citate in CAMPUS per ogni sezione della bozza,
   con gli estratti originali e la loro provenienza.
 - `lettera_ufficiale.txt` contiene l’originale abbinato alla versione del ricovero.
-- `metriche.json` contiene i token e i tempi dello stream, i campioni dello Spark
-  durante la prova e l’energia per la finestra del monitor.
+- `metriche.json` contiene la versione del prompt, i token e i tempi dello stream,
+  i campioni dello Spark e i Wh stimati per il run (`hardware_spark.energy_in_run`).
+  Il totale della finestra mobile è in `hardware_spark.energy_monitor_window`.
 - `scheda.json` riporta il ricovero, lo stato, il modello richiesto e quello
   riportato dallo stream, il livello di reasoning e l’abilitazione dei tool.
 
-Per un tentativo fallito o interrotto, l’archivio conserva `risposta.parziale.json`
-quando è disponibile. Il servizio `spark-archive` ritenta il recupero degli
-originali temporaneamente indisponibili. Gli artefatti tecnici completi sono
-nella cartella di esecuzione sotto `output/dimissioni-mimic/`. Se è presente
+Gli artefatti tecnici, incluse le risposte parziali dei tentativi falliti o
+interrotti, sono nella cartella di esecuzione sotto `output/dimissioni-mimic/`.
+Il servizio `spark-archive` ritenta il recupero degli originali temporaneamente
+indisponibili prima di pubblicare la cartella. Un originale assente (HTTP 404)
+impedisce la pubblicazione. I record delle versioni precedenti non ancora
+archiviati sono esclusi dalla nuova coda. Se è presente
 `.archive-reset` in `TEST-SPARK`, all’avvio il servizio archivia soltanto i
 record scritti dopo l’ultima modifica del marcatore.
 
@@ -96,8 +105,10 @@ originali. Le evidenze individuano gli eventi della cronologia strutturata e i
 paragrafi delle note lunghe; le note brevi restano intere. Il
 catalogo è salvato prima dell'inferenza in `catalogo_evidenze.json`; lo stream
 grezzo rimane in `risposta.parziale.json`, anche a completamento riuscito.
-Riferimenti sconosciuti o incoerenti fanno fallire il controllo, conservando la
-risposta grezza. Le citazioni sono per sezione e non certificano tutte le frasi.
+Se il formato o i riferimenti fanno fallire il controllo, il flusso web salva
+come bozza da revisionare il testo recuperabile delle sezioni riconosciute.
+Conserva i riferimenti risolvibili e registra l'esito tecnico in `scheda.json`
+e `metriche.json`. Le citazioni sono per sezione e non certificano tutte le frasi.
 
 Il template è `campus-discharge` 1.1.0: con istologico **No**, i dettagli restano
 vuoti; se la risposta manca nelle fonti, viene segnalata la lacuna senza dedurre No.

@@ -147,6 +147,8 @@ class ExecutionRecord:
                 "artifact_directory": str(artifacts.directory),
             }
         )
+        if packet.context.expanded_sources:
+            self.data["initial_evidence_count"] = artifacts.report["passaggi_nella_richiesta"]
         artifacts.report["run_id"] = self.data["run_id"]
         artifacts.report["trace_id"] = self.data["trace_id"]
         artifacts.report["registro_schema"] = REGISTRY_SCHEMA

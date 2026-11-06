@@ -1,4 +1,4 @@
-"""Prepara una sola richiesta con tutte le note e tutti i campi, senza troncamenti."""
+"""Prepara la richiesta con il catalogo completo e le stime per il registro."""
 
 from dataclasses import dataclass
 
@@ -27,7 +27,7 @@ class PreparedRequest:
     input_estimate_method: str
     input_tokenizer_revision: str | None
     facts: FactInventory
-    window_tokens: int
+    window_tokens: int | None
     safety_margin_tokens: int
     input_tokens_breakdown: dict[str, int]
 
@@ -45,18 +45,18 @@ def prepare_request(
     if catalog.sources != current.sources:
         raise ValueError("Il catalogo preparato non corrisponde alle fonti del pacchetto.")
     model_config = model_config or ModelConfig()
-    facts = extract_facts(catalog)
     dataset = packet.context.dataset
+    facts = extract_facts(catalog, dataset=dataset)
     instructions = build_instructions(packet.template, dataset=dataset)
-    prompt = build_prompt(packet, catalog, facts)
     if model_config.tools_enabled:
         instructions = with_read_tools(instructions)
+    prompt = build_prompt(packet, catalog, facts)
     token_estimate = estimate_input_tokens(instructions, prompt, model_config)
     estimate = token_estimate.tokens
-    # Riserva per gli schemi dei tool. Le risposte entrano nel controllo della
-    # storia prima della richiesta successiva, senza troncamenti.
     tool_reserve = 8192 if model_config.tools_enabled else 0
-    if estimate + output_tokens + config.safety_margin_tokens + tool_reserve > config.window_tokens:
+    if config.window_tokens is not None and (
+        estimate + output_tokens + config.safety_margin_tokens + tool_reserve > config.window_tokens
+    ):
         raise ValueError(
             f"Contesto troppo grande: {estimate} token stimati di input, "
             f"{output_tokens} riservati all'output, margine {config.safety_margin_tokens}; "
@@ -75,6 +75,10 @@ def prepare_request(
         window_tokens=config.window_tokens,
         safety_margin_tokens=config.safety_margin_tokens,
         input_tokens_breakdown=input_token_breakdown(
-            instructions, prompt, (s.text for s in catalog.sources), model_config, estimate
+            instructions,
+            prompt,
+            (source.text for source in catalog.sources),
+            model_config,
+            estimate,
         ),
     )

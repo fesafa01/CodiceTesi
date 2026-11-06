@@ -6,6 +6,7 @@ export type Context = {
 	dataset: string;
 	dataset_version: string;
 	limitations: string[];
+	display_name?: string | null;
 };
 export type Source = {
 	id: string;
@@ -27,7 +28,8 @@ export type FactInventory = {
     facts: { id: string; source_id: string; evidence_id: string; kind: string;
         label: string; event_time: string | null; status: string | null;
         attributes: Record<string, unknown> }[];
-    issues: { code: string; message: string; fact_ids: string[]; evidence_ids: string[] }[];
+    issues: { code: string; message: string; fact_ids: string[]; evidence_ids: string[];
+        section_id?: string | null }[];
 };
 export type Section = {
 	id: string;
@@ -80,6 +82,7 @@ export type Job = {
 	detail?: string;
 	result?: Result;
     preview?: Preview;
+    visible_section_ids?: string[];
 };
 export type Preparation = Job & { packet: Packet; catalog: Catalog; facts?: FactInventory; editor?: Editor };
 

@@ -32,6 +32,15 @@ test("download uses current edits and labels unfinished generation", () => {
     expect(text).not.toContain("In arrivo");
 });
 
+test("download labels a recovered draft even after the job completes", () => {
+    const recovered = { ...job, status: "completed" as const,
+        result: { draft: { sections: [{ section_id: "a", text: "Testo recuperato", sources: [] }] },
+            validation: { technical: "failed", clinical_review: "not_performed" } } as Job["result"] };
+    const text = letterText([{ id: "a", title: "Prima" }] as Section[], {}, recovered);
+    expect(text).toContain("CONTROLLI TECNICI NON SUPERATI");
+    expect(text).toContain("Testo recuperato");
+});
+
 test("saved snapshot stays dirty if editing continues during a save", () => {
     expect(sameEdits({ a: "uno", b: "due" }, { b: "due", a: "uno" })).toBe(true);
     expect(sameEdits({ a: "nuovo" }, { a: "salvato" })).toBe(false);

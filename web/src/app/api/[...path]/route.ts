@@ -67,8 +67,9 @@ async function proxy(request: NextRequest, path: string[]) {
 		? `${reference}/api/v1/revisione/${route}${request.nextUrl.search}`
 		: `${agent}/api/v1/${path.map(encodeURIComponent).join("/")}`;
 	const isStream = request.method === "GET" && path[2] === "stream";
+	const isGenerationStart = request.method === "POST" && path[2] === "genera";
 	try {
-		const response = await fetch(target, {
+		const options: RequestInit = {
 			method: request.method,
 			cache: "no-store",
 			signal: isStream ? request.signal : AbortSignal.timeout(30_000),
@@ -77,6 +78,11 @@ async function proxy(request: NextRequest, path: string[]) {
 				"Content-Type": "application/json",
 			},
 			body: request.method === "POST" ? await request.text() : undefined,
+		};
+		const response = await fetch(target, options).catch((error: unknown) => {
+			// L'agente avvia al massimo un lavoro per lo stesso ID di preparazione.
+			if (!isGenerationStart || options.signal?.aborted) throw error;
+			return fetch(target, options);
 		});
 		if (isStream && response.ok) {
 			return new Response(response.body, {

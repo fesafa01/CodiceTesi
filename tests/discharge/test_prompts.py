@@ -1,6 +1,7 @@
 """Tutti i campi e le note nel prompt, con controllo del budget prima dell'inferenza."""
 
 import json
+from hashlib import sha256
 
 import pytest
 
@@ -78,8 +79,27 @@ def test_requirements_and_histology_empty_cell_rule_reach_model(packet_factory):
             "2141-01-02 10:00:00 | Ordine farmacologico in degenza | drug=Farmaco A",
             "gli ordini in degenza non attestano somministrazioni",
             {"decorso": "Il 02/01/2141 è documentato un ordine di Farmaco A in degenza."},
-            {"terapia_dimissione": MISSING_VALUE, "programma_followup": ""},
+            {"terapia_dimissione": "", "programma_followup": ""},
             id="solo-ordine-in-degenza",
+        ),
+        pytest.param(
+            "dati_ricovero",
+            "hosp/pharmacy + hosp/prescriptions (Discharge Med)",
+            "2141-01-02 | Ordine di farmacia per dimissione | drug=Farmaco A | "
+            "dose_val_rx=10 | dose_unit_rx=mg",
+            "nella terapia in dimissione come ordini documentati",
+            {"terapia_dimissione": "Farmaco A, 10 mg."},
+            {"programma_followup": ""},
+            id="ordine-di-dimissione",
+        ),
+        pytest.param(
+            "dati_ricovero",
+            "hosp/poe + hosp/poe_detail",
+            "After discharge: outpatient review requested in two weeks.",
+            "In programma_followup, riporta solo un piano o un controllo esplicitamente",
+            {"programma_followup": "Richiesto un controllo ambulatoriale tra due settimane."},
+            {"terapia_dimissione": ""},
+            id="controllo-dopo-la-dimissione",
         ),
         pytest.param(
             "dati_ricovero",
@@ -127,6 +147,9 @@ def test_mimic_prompt_and_expected_campus_draft(
     assert request.prompt_version != baseline.prompt_version
     assert "# Guida alle fonti MIMIC-IV" not in baseline.instructions
     assert rule in request.instructions
+    assert "Scrivi una lettera italiana anche quando tutte le fonti sono inglesi." in (
+        request.instructions
+    )
     assert "una sintesi anche di una sola frase" in request.instructions
     assert f'Origine: "{origin}"' in request.prompt
     assert request.prompt.count(text) == 1
@@ -151,8 +174,116 @@ def test_mimic_prompt_and_expected_campus_draft(
                 "sources": [citation] if section.id in documented else [],
             }
         )
-    expected = parse_draft(json.dumps({"sections": sections}), request.catalog, packet.template)
+    expected = parse_draft(
+        json.dumps({"sections": sections}), request.catalog, packet.template, dataset=MIMIC_DATASET
+    )
     validate_draft(render_draft(expected, packet.template), packet.template)
+    therapy = next(
+        section for section in expected.sections if section.section_id == "terapia_dimissione"
+    )
+    assert therapy.text == documented.get("terapia_dimissione", "")
+    (warning,) = [issue for issue in request.facts.issues if issue.section_id == therapy.section_id]
+    assert warning.message not in request.prompt
+    if therapy.text:
+        assert warning.evidence_ids == tuple(citation["evidence_ids"])
+        assert "via di somministrazione, frequenza, durata" in warning.message
+        assert "dose" not in warning.message
+    else:
+        assert warning.evidence_ids == ()
+
+
+def test_complete_discharge_order_has_no_review_warning(packet_factory):
+    packet = packet_factory(
+        "dati_ricovero",
+        text=(
+            "2141-01-02 | Ordine di farmacia per dimissione | drug=Farmaco A | "
+            "dose_val_rx=10 | dose_unit_rx=mg | route=PO | doses_per_24_hrs=1 | "
+            "duration=5 | duration_interval=days"
+        ),
+    )
+    source = packet.sources[0].model_copy(
+        update={"origin": "hosp/pharmacy + hosp/prescriptions (Discharge Med)"}
+    )
+    packet = packet.model_copy(
+        update={
+            "context": packet.context.model_copy(update={"dataset": MIMIC_DATASET}),
+            "sources": (source,),
+        }
+    )
+    request = prepare_request(packet, ContextConfig(), output_tokens=512)
+    assert all(issue.section_id != "terapia_dimissione" for issue in request.facts.issues)
+
+
+@pytest.mark.parametrize(
+    "details, expected",
+    [
+        (None, "non risultano ordini strutturati"),
+        (
+            "field_name=plan | field_value=Post-discharge follow-up",
+            "indicazioni dopo la dimissione e tempistica",
+        ),
+        (
+            "field_name=plan | field_value=Outpatient follow-up after discharge",
+            "Verificare tempistica",
+        ),
+        (
+            "field_name=plan | field_value=After discharge, follow-up with cardiology in two weeks",
+            None,
+        ),
+        (
+            "field_name=plan | field_value=After discharge, follow-up with cardiology "
+            "in two weeks. Appointment not booked.",
+            None,
+        ),
+        (
+            "field_name=plan | field_value=Outpatient follow-up after discharge | "
+            "field_name=timing | field_value=Two weeks",
+            None,
+        ),
+        (
+            "field_name=plan | field_value=Outpatient follow-up after discharge | "
+            "field_name=unrelated | field_value=2026-11-09",
+            "Verificare tempistica",
+        ),
+        (
+            "field_name=plan | field_value=No outpatient follow-up in two weeks after discharge",
+            "indicazioni dopo la dimissione e tempistica",
+        ),
+    ],
+)
+def test_followup_review_warnings_are_separate_from_the_prompt(packet_factory, details, expected):
+    packet = packet_factory(
+        "dati_ricovero",
+        text=f"2141-01-02 10:00:00 | Ordine POE | poe_id=ordine-1 | {details}"
+        if details
+        else "Nota",
+    )
+    source = packet.sources[0].model_copy(
+        update={
+            "origin": (
+                "hosp/poe + hosp/poe_detail (candidati follow-up)" if details else "hosp/poe"
+            )
+        }
+    )
+    packet = packet.model_copy(
+        update={
+            "context": packet.context.model_copy(update={"dataset": MIMIC_DATASET}),
+            "sources": (source,),
+        }
+    )
+    request = prepare_request(
+        packet, ContextConfig(), output_tokens=512, model_config=ModelConfig(tools_enabled=True)
+    )
+    assert "puoi usare leggi_evidenze" in request.instructions
+    issues = [issue for issue in request.facts.issues if issue.section_id == "programma_followup"]
+    if expected is None:
+        assert issues == []
+    else:
+        (warning,) = issues
+        assert expected in warning.message and warning.message not in request.prompt
+        assert warning.evidence_ids == tuple(
+            e.id for e in request.catalog.evidences if details and e.source_id == source.id
+        )
 
 
 def test_request_rejects_context_budget_before_inference_without_truncating_notes(packet_factory):
@@ -161,10 +292,44 @@ def test_request_rejects_context_budget_before_inference_without_truncating_note
         prepare_request(packet, ContextConfig(window_tokens=32768), output_tokens=8192)
 
 
+@pytest.mark.parametrize("tools_enabled", [False, True])
+def test_expanded_mimic_sends_full_catalog_above_previous_limit(packet_factory, tools_enabled):
+    text = "\n".join(f"Evento di laboratorio numero {i} con valore e unità." for i in range(7500))
+    packet = packet_factory("dati_ricovero", "dati_ricovero", text=text)
+    therapy = "Ordine di dimissione sintetico da conservare."
+    packet = packet.model_copy(
+        update={
+            "context": packet.context.model_copy(
+                update={"dataset": MIMIC_DATASET, "expanded_sources": True}
+            ),
+            "sources": (
+                packet.sources[0],
+                packet.sources[1].model_copy(
+                    update={
+                        "text": therapy,
+                        "origin": "hosp/pharmacy + hosp/prescriptions (Discharge Med)",
+                        "sha256": sha256(therapy.encode()).hexdigest(),
+                    }
+                ),
+            ),
+        }
+    )
+    model = ModelConfig(tools_enabled=tools_enabled)
+    result = prepare_request(
+        packet, ContextConfig(), output_tokens=model.max_tokens, model_config=model
+    )
+    assert result.window_tokens is None
+    assert result.input_tokens_estimate > 100000
+    assert result.prompt.count("Evento di laboratorio numero ") == 7500
+    assert result.prompt.count("PASSAGGIO evidenza-") == len(result.catalog.evidences)
+    assert result.catalog.sources[0].text == text
+    assert therapy in result.prompt
+
+
 def test_long_italian_notes_fit_with_tokenizer_and_are_preserved_in_full(packet_factory):
     text = "Paziente vigile, orientato. Non riferisce dolore. Temperatura 36,5 °C.\n" * 1600
     packet = packet_factory("diario", text=text)
-    config, model = ContextConfig(), ModelConfig()
+    config, model = ContextConfig(window_tokens=100000), ModelConfig()
     request = prepare_request(packet, config, output_tokens=model.max_tokens, model_config=model)
     messages = [
         {"role": "system", "content": request.instructions},

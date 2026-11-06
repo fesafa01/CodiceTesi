@@ -122,15 +122,12 @@ attribuisce allo Spark le caratteristiche del Mac o del container client.
 `source_sha256` identifica i sorgenti e i template installati, non un commit Git.
 Nell’installazione il manifest segue i file dichiarati nel pacchetto distribuito,
 escludendo eventuali copie residue non appartenenti alla distribuzione.
-Per `deepseek-v4-flash` e `deepseek-v4-pro`, il controllo del contesto usa il tokenizer
-ufficiale DeepSeek V4 incluso nel pacchetto e il template testuale system/user/assistant
-di DS4, con la modalità thinking richiesta. Il conteggio è locale e funziona offline.
-Metodo e revisione del tokenizer sono registrati in `input_estimate_method` e
-`input_tokenizer_revision`, anche negli esiti. È una stima del prompt del runtime:
-il conteggio effettivo resta quello restituito dal server. Il controllo riserva
-l'intero limite di output e il margine di sicurezza di 1.024 token entro il budget
-di 100.000 token. Per ID di modelli diversi resta la stima prudenziale in byte UTF-8
-più 512, segnalata esplicitamente nel metodo; non viene applicato il tokenizer DeepSeek.
+La stima del prompt usa il tokenizer locale di DeepSeek V4 per
+`deepseek-v4-flash` e `deepseek-v4-pro`, e il tokenizer locale Qwen per
+`qwen3.8:27b`. Per gli altri ID usa la lunghezza in byte UTF-8 più 512.
+Metodo e revisione sono registrati in `input_estimate_method` e
+`input_tokenizer_revision`. Le stime servono al registro e i token effettivi
+provengono dall’usage del serving. Il flusso web invia il catalogo completo.
 
 Scrittura atomica per ogni record e nessun file CSV condiviso in append: processi
 concorrenti scrivono UUID distinti. Il checkpoint ogni 15 secondi aggiorna lo stato

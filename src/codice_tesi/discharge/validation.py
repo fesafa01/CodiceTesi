@@ -2,6 +2,7 @@
 
 import re
 
+from codice_tesi.discharge.contracts import DraftContractError
 from codice_tesi.discharge.template import MISSING_VALUE, LetterTemplate
 
 
@@ -15,7 +16,7 @@ def validate_draft(text: str, template: LetterTemplate) -> None:
     pattern = r"^[ \t]*(?:" + "|".join(re.escape(title) for title in headings) + r")[ \t]*$"
     matches = list(re.finditer(pattern, text, re.MULTILINE))
     if [match.group().strip() for match in matches] != headings:
-        raise ValueError(
+        raise DraftContractError(
             "La bozza deve contenere tutte le intestazioni Campus una volta in ordine."
         )
     content = {
@@ -27,11 +28,11 @@ def validate_draft(text: str, template: LetterTemplate) -> None:
     answer = content["istologico_in_attesa"]
     details = content["informazioni_istologico"]
     if answer != MISSING_VALUE and answer.casefold() not in {"sì", "si", "no"}:
-        raise ValueError("L'attesa dell'istologico richiede solo Sì/No o il dato mancante.")
+        raise DraftContractError("L'attesa dell'istologico richiede solo Sì/No o il dato mancante.")
     if answer.casefold() in {"sì", "si"}:
         if not details:
-            raise ValueError("Con Sì riportare i dettagli istologici o segnalare il dato mancante.")
+            raise DraftContractError("Con Sì riportare i dettagli istologici o il dato mancante.")
     elif details:
-        raise ValueError(
+        raise DraftContractError(
             "Con No o risposta non documentata le informazioni istologiche restano vuote."
         )

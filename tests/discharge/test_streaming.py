@@ -32,6 +32,7 @@ def sse(text, finish=None):
 def test_single_http_call_streams_before_completion_and_flushes_same_file(
     packet_factory, tmp_path, monkeypatch, thinking, model, letter_factory, response_factory
 ):
+    monkeypatch.setenv("TELEMETRY_ENABLED", "false")
     packet = packet_factory("triage", "anamnesi")
     calls = []
     hidden = "Controllo interno sintetico."
@@ -514,5 +515,11 @@ def test_oversized_notes_fail_before_creating_client(packet_factory, tmp_path, m
         api, "create_client", lambda *a, **k: pytest.fail("LLM con budget superato")
     )
     with pytest.raises(ValueError, match="Nessuna nota è stata troncata"):
-        asyncio.run(application.run_application(backend_url="http://test", output_dir=tmp_path))
+        asyncio.run(
+            application.run_application(
+                backend_url="http://test",
+                output_dir=tmp_path,
+                context_config=ContextConfig(window_tokens=100000),
+            )
+        )
     assert not list(tmp_path.rglob("bozza.txt"))

@@ -12,20 +12,19 @@ from uuid import uuid4
 
 from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.context import PreparedRequest
-from codice_tesi.discharge.models import CompositionPacket
+from codice_tesi.discharge.contracts import DraftContractError
+from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
 from codice_tesi.discharge.provenance import (
     TRACE_SCHEMA_VERSION,
     TraceBinding,
     TraceResult,
     parse_draft,
+    recover_draft,
     render_draft,
     render_evidences,
 )
+from codice_tesi.discharge.template import MISSING_VALUE
 from codice_tesi.discharge.validation import validate_draft
-
-
-class DraftContractError(ValueError):
-    """La bozza decodificata non supera i controlli tecnici."""
 
 
 class RunArtifacts:
@@ -98,22 +97,46 @@ class RunArtifacts:
                 "localizzazione": self.catalog.segmentation_version,
             },
         }
+        if packet.context.expanded_sources:
+            self.report["passaggi_disponibili"] = len(self.catalog.evidences)
+            self.report["passaggi_nella_richiesta"] = len(self.catalog.evidences)
         self.finish("preparato")
 
     @contextmanager
-    def open_draft(self, *, validation_context=nullcontext) -> Iterator[TextIO]:
-        """Conserva sempre il JSON grezzo; pubblica le viste solo dopo i controlli."""
+    def open_draft(
+        self, *, validation_context=nullcontext, allow_recovery=False
+    ) -> Iterator[TextIO]:
+        """Conserva la risposta grezza e segnala eventuali bozze recuperate."""
         with self.partial.open("x", encoding="utf-8") as output:
             yield output
         with validation_context():
             try:
                 raw = self.partial.read_text(encoding="utf-8")
                 if not raw.strip():
-                    raise ValueError("Il modello non ha prodotto testo.")
-                draft = parse_draft(raw, self.catalog, self.template)
-                text = render_draft(draft, self.template)
-                validate_draft(text, self.template)
+                    raise DraftContractError("Il modello non ha prodotto testo.")
                 context = self.packet.context
+                mimic = context.dataset == MIMIC_DATASET
+                recovered = False
+                try:
+                    draft = parse_draft(raw, self.catalog, self.template, dataset=context.dataset)
+                    text = render_draft(draft, self.template)
+                    validate_draft(text, self.template)
+                except (json.JSONDecodeError, DraftContractError) as exc:
+                    if not allow_recovery:
+                        raise
+                    draft = recover_draft(raw, self.catalog, self.template, dataset=context.dataset)
+                    if draft is None:
+                        raise
+                    recovered = True
+                    self.report["tracciabilita"]["errore_controlli"] = str(exc)
+                technical = "failed" if recovered else "passed"
+                if mimic:
+                    self.report["sezioni_da_completare"] = [
+                        section.section_id
+                        for section in draft.sections
+                        if section.text == MISSING_VALUE
+                        or (section.section_id == "terapia_dimissione" and not section.text)
+                    ]
                 result = TraceResult(
                     binding=TraceBinding(
                         run_id=self.report["run_id"],
@@ -128,24 +151,26 @@ class RunArtifacts:
                     catalog=self.catalog,
                     draft=draft,
                     facts=self.facts,
-                    validation={"technical": "passed", "clinical_review": "not_performed"},
+                    validation={"technical": technical, "clinical_review": "not_performed"},
                 )
                 views = {
                     self.structured: result.model_dump_json(indent=2) + "\n",
                     self.evidences: render_evidences(result, self.template),
-                    self.draft: text,
+                    self.draft: render_draft(
+                        draft, self.template, dataset=context.dataset, recovered=recovered
+                    ),
                 }
                 for path, content in views.items():
                     temporary = path.with_suffix(path.suffix + ".tmp")
                     temporary.write_text(content, encoding="utf-8")
                     temporary.replace(path)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, DraftContractError):
                 self.report["tracciabilita"]["technical"] = "failed"
                 raise
             except ValueError as exc:
                 self.report["tracciabilita"]["technical"] = "failed"
-                raise DraftContractError(str(exc)) from exc
-            self.report["tracciabilita"]["technical"] = "passed"
+                raise DraftContractError("Controllo di coerenza della bozza fallito.") from exc
+            self.report["tracciabilita"]["technical"] = technical
 
     def start(self) -> None:
         self.report["richieste_llm_avviate"] = 1

@@ -3,6 +3,10 @@
 from pydantic import BaseModel, ConfigDict
 
 
+class DraftContractError(ValueError):
+    """Violazione tecnica della bozza con un messaggio privo di contenuti clinici."""
+
+
 class Contract(BaseModel):
     """Rifiuta proprietà sconosciute e impedisce modifiche accidentali allo stato.
 

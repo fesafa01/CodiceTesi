@@ -7,14 +7,49 @@ pacchetti esistenti. Le note libere non vengono interpretate automaticamente.
 import json
 import re
 from datetime import datetime
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from pydantic import JsonValue
 
 from codice_tesi.discharge.contracts import Contract
+from codice_tesi.discharge.models import (
+    MIMIC_DATASET,
+    MIMIC_DISCHARGE_ORDERS,
+    MIMIC_FOLLOWUP_ORDERS,
+)
 
 if TYPE_CHECKING:
     from codice_tesi.discharge.provenance import EvidenceCatalog
+
+FOLLOWUP_ACTION = re.compile(
+    r"\b(?:outpatient (?:follow[ -]?up|review|visit)|"
+    r"(?:follow[ -]?up|appointment|visit|review) (?:with|at) \w+|"
+    r"(?:controllo|visita) (?:ambulatoriale|specialistica|con|presso|di))\b",
+    re.IGNORECASE,
+)
+POST_DISCHARGE = re.compile(
+    r"\b(?:post[ -]?discharge|after (?:hospital )?discharge|dopo la dimissione)\b", re.I
+)
+FOLLOWUP_NEGATION = re.compile(
+    r"\b(?:no (?:outpatient )?follow[ -]?up|(?:nessun[ao]?|senza) (?:controllo|visita)|"
+    r"not (?:required|needed|in|within|on)|non (?:necessari[oa]|richiest[oa]|entro))\b",
+    re.IGNORECASE,
+)
+FOLLOWUP_TIME = re.compile(
+    r"\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?|"
+    r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|a|an|"
+    r"un|una|due|tre|quattro|cinque|sei|sette|otto|nove|dieci)\s+"
+    r"(?:hours?|days?|weeks?|months?|ore?|giorn[oi]|settiman[ae]|mes[ei])|"
+    r"next (?:week|month)|(?:la )?prossima settimana|il prossimo mese)\b",
+    re.IGNORECASE,
+)
+FOLLOWUP_TIMING_FIELDS = {"timing", "timeframe", "time frame", "due date", "appointment date"}
+TIMING_IN_INSTRUCTIONS = re.compile(
+    rf"(?:\b(?:in|within|after|on|tra|fra|entro|il)\s+{FOLLOWUP_TIME.pattern}|"
+    r"\b(?:next (?:week|month)|la prossima settimana|il prossimo mese)\b)",
+    re.IGNORECASE,
+)
 
 
 class DocumentFact(Contract):
@@ -33,6 +68,7 @@ class DocumentaryIssue(Contract):
     message: str
     fact_ids: tuple[str, ...]
     evidence_ids: tuple[str, ...]
+    section_id: str | None = None
 
 
 class FactInventory(Contract):
@@ -66,7 +102,129 @@ def _fields(text: str) -> list[str]:
     return parts
 
 
-def extract_facts(catalog: "EvidenceCatalog") -> FactInventory:
+def _order_passages(catalog: "EvidenceCatalog", origin: str, label: str):
+    sources = {
+        source.id: source
+        for source in catalog.sources
+        if source.origin.removeprefix("hosp/") == origin
+    }
+    for evidence in catalog.evidences:
+        source = sources.get(evidence.source_id)
+        if source is None:
+            continue
+        parts = _fields(source.text[evidence.start : evidence.end].strip())
+        if len(parts) >= 3 and parts[1] == label:
+            yield evidence.id, parts[2:]
+
+
+def _discharge_therapy_issues(catalog: "EvidenceCatalog") -> list[DocumentaryIssue]:
+    issues = []
+    found_order = False
+    for evidence_id, parts in _order_passages(
+        catalog, MIMIC_DISCHARGE_ORDERS, "Ordine di farmacia per dimissione"
+    ):
+        fields = {
+            key: value.strip()
+            for key, value in (part.split("=", 1) for part in parts if "=" in part)
+        }
+        drug = fields.get("drug")
+        if not drug:
+            continue
+        found_order = True
+        missing = []
+        if not fields.get("dose_val_rx"):
+            missing.append("dose")
+        elif not fields.get("dose_unit_rx"):
+            missing.append("unità della dose")
+        if not fields.get("route"):
+            missing.append("via di somministrazione")
+        if not (fields.get("frequency") or fields.get("doses_per_24_hrs")):
+            missing.append("frequenza")
+        if not fields.get("duration"):
+            missing.append("durata")
+        if missing:
+            attributes = ", ".join(missing)
+            issues.append(
+                DocumentaryIssue(
+                    code="discharge_therapy_incomplete_order",
+                    message=f"Per {drug}, verificare {attributes} nell'ordine di dimissione.",
+                    fact_ids=(),
+                    evidence_ids=(evidence_id,),
+                    section_id="terapia_dimissione",
+                )
+            )
+    if not found_order:
+        issues.append(
+            DocumentaryIssue(
+                code="discharge_therapy_no_structured_orders",
+                message=(
+                    "Nelle fonti caricate non risultano ordini strutturati di dimissione. "
+                    "Verificare la terapia prevista alla dimissione."
+                ),
+                fact_ids=(),
+                evidence_ids=(),
+                section_id="terapia_dimissione",
+            )
+        )
+    return issues
+
+
+def _followup_issues(catalog: "EvidenceCatalog") -> list[DocumentaryIssue]:
+    issues = []
+    found_candidate = False
+    for evidence_id, parts in _order_passages(catalog, MIMIC_FOLLOWUP_ORDERS, "Ordine POE"):
+        found_candidate = True
+        details = [
+            (
+                name.removeprefix("field_name=").strip().casefold().replace("_", " "),
+                value.removeprefix("field_value=").strip(),
+            )
+            for name, value in pairwise(parts[1:])
+            if name.startswith("field_name=")
+            and value.startswith("field_value=")
+            and not FOLLOWUP_NEGATION.search(value.removeprefix("field_value="))
+        ]
+        action_details = [value for _, value in details if FOLLOWUP_ACTION.search(value)]
+        post_discharge = POST_DISCHARGE.search(parts[0]) or any(
+            POST_DISCHARGE.search(value) for _, value in details
+        )
+        timing_details = [value for name, value in details if name in FOLLOWUP_TIMING_FIELDS]
+        missing = []
+        if not action_details or not post_discharge:
+            missing.append("indicazioni dopo la dimissione")
+        if not (
+            any(FOLLOWUP_TIME.search(value) for value in timing_details)
+            or any(TIMING_IN_INSTRUCTIONS.search(value) for value in action_details)
+        ):
+            missing.append("tempistica")
+        if missing:
+            fields = " e ".join(missing)
+            issues.append(
+                DocumentaryIssue(
+                    code="discharge_followup_incomplete_candidate",
+                    message=f"Verificare {fields} nel passaggio del possibile follow-up.",
+                    fact_ids=(),
+                    evidence_ids=(evidence_id,),
+                    section_id="programma_followup",
+                )
+            )
+    if not found_candidate:
+        issues.append(
+            DocumentaryIssue(
+                code="discharge_followup_no_structured_candidates",
+                message=(
+                    "Nelle fonti caricate non risultano ordini strutturati candidati al follow-up. "
+                    "Verificare indicazioni e tempistiche nelle fonti disponibili."
+                ),
+                fact_ids=(),
+                evidence_ids=(),
+                section_id="programma_followup",
+            )
+        )
+    return issues
+
+
+def extract_facts(catalog: "EvidenceCatalog", *, dataset: str | None = None) -> FactInventory:
     sources = {source.id: source for source in catalog.sources}
     facts, issues = [], []
     observations = {}
@@ -171,4 +329,7 @@ def extract_facts(catalog: "EvidenceCatalog") -> FactInventory:
                     )
                 )
             observations[key] = fact
+    if dataset == MIMIC_DATASET:
+        issues.extend(_discharge_therapy_issues(catalog))
+        issues.extend(_followup_issues(catalog))
     return FactInventory(facts=tuple(facts), issues=tuple(issues))

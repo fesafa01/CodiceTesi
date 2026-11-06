@@ -24,7 +24,13 @@ export default function CasesPage() {
 		setError("");
 		setSelected("");
 		try {
-			setContexts(await api<Context[]>("contesti"));
+			const cases = await api<Context[]>("contesti");
+            if (cases.every((context) => context.display_name)) {
+                cases.sort((a, b) =>
+                    (a.display_name ?? a.id).localeCompare(b.display_name ?? b.id, "it", { numeric: true })
+                );
+            }
+            setContexts(cases);
 		} catch (e) {
 			setError((e as Error).message);
 		} finally {
@@ -50,7 +56,7 @@ export default function CasesPage() {
 		}
 	}
 	const filtered = contexts.filter((c) =>
-		`${c.id} ${c.patient_id ?? ""} ${c.episode_id ?? ""}`
+		`${c.display_name ?? ""} ${c.id} ${c.patient_id ?? ""} ${c.episode_id ?? ""}`
 			.toLowerCase()
 			.includes(search.toLowerCase()),
 	);
@@ -136,7 +142,7 @@ export default function CasesPage() {
 										<FiUser />
 									</span>
 									<span className="case-info">
-										<strong>{c.id}</strong>
+										<strong>{c.display_name ?? c.id}</strong>
 										<span>Paziente {c.patient_id ?? "non identificato"}</span>
 										<small>Episodio {c.episode_id ?? "non disponibile"}</small>
 									</span>
@@ -182,7 +188,7 @@ export default function CasesPage() {
 					{current && (
 						<div className="selected-summary">
 							<small>DEGENZA SELEZIONATA</small>
-							<strong>{current.id}</strong>
+							<strong>{current.display_name ?? current.id}</strong>
 						</div>
 					)}
 					<button

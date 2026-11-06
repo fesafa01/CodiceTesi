@@ -85,10 +85,15 @@ le estensioni da scaricare e il comando ICU.
   caratteri ciascuno. Per eMAR, laboratorio e radiologia contano il tempo
   dell'evento e quello di registrazione. In microbiologia, se sono presenti
   solo le date, si accettano i giorni interni alla degenza.
-- La fonte separata della terapia finale ammette fino a 40 ordini espliciti
-  `Discharge Med` attivi, verificati entro la dimissione e collegati a
-  `prescriptions` per ricovero e `pharmacy_id`. Lo stato eMAR resta
-  distinto dall'ordine. POE attesta ordini e stati, compreso l'annullamento.
+- La fonte separata della terapia finale conserva gli ordini espliciti
+  `Discharge Med` attivi e verificati entro la dimissione. Usa `prescriptions`
+  quando collegabile per paziente, ricovero e `pharmacy_id`. Quando il farmaco
+  è documentato solo in `pharmacy`, conserva i dati disponibili in quella
+  riga. Lo stato eMAR resta distinto dall'ordine.
+- Gli ordini POE attivi con segnali di follow-up o di controlli dopo la
+  dimissione sono raccolti in una fonte dedicata con i dettagli disponibili.
+  Le parole chiave individuano candidati da verificare. Il resto degli ordini
+  conserva i limiti previsti per la cronologia generica.
 - Nel precedente campione Hosp, i 20 ricoveri avevano 218 fonti. Gli ordini
   POE erano disponibili in 20 ricoveri, eMAR e microbiologia in 8 ciascuno,
   HCPCS in 4 e DRG in 16. Nessun ordine `Discharge Med` soddisfaceva tutti
@@ -145,15 +150,116 @@ presenza di informazioni corrispondenti nel testo narrativo.
 | Contatti e urgenze | Discharge Instructions, Followup Instructions | Corrispondenza parziale. I recapiti possono essere oscurati o legati a un altro sistema sanitario. |
 | In attesa di istologico | Pending Results o testo narrativo | Un esame in attesa è pertinente se identificato esplicitamente come istologico. L'assenza di menzione lascia il campo da completare. |
 | Informazioni sull'istologico | Pending Results, Brief Hospital Course, Discharge Instructions | Valutare dettagli e modalità di ritiro solo con attesa istologica documentata. |
-| Medici | Attending o firma, se presente | Ruoli potenzialmente diversi e nominativi spesso oscurati. |
+| Medici | Attending o autore deidentificato | Campo escluso dalla bozza e dal confronto MIMIC. |
 
 ## Guida di stesura MIMIC
 
-Per il dataset MIMIC, il prompt `campus-mimic-v4` riporta l'origine di ogni
+Per il dataset MIMIC, il prompt `campus-mimic-v7` riporta l'origine di ogni
 fonte e usa la guida MIMIC con le stesse 17 sezioni CAMPUS. I codici ICD
 retrospettivi vanno nei campi codificati con l'indicazione «codifica
 amministrativa del ricovero». L'epicrisi può essere breve quanto consentono
-le evidenze disponibili. La versione del prompt viene registrata in `esito.json`.
+le evidenze disponibili. Il prompt richiede di tradurre in italiano la prosa
+della bozza e le descrizioni cliniche, preservando codici, nomi, valori e unità.
+Il template CAMPUS conserva tutte le sezioni. Nella bozza MIMIC, nelle fonti
+per sezione e nel confronto locale si omette il campo dei medici. Il campo
+sull'istologico compare solo con un Sì o un No citato. I dettagli compaiono
+quando la risposta è Sì e sono disponibili informazioni citabili. Terapia e
+controlli dopo la dimissione compaiono anche quando restano da compilare. Per MIMIC, il validatore inserisce
+i campi mancanti e sostituisce il testo privo di citazioni con la forma prevista
+per i dati assenti. Le citazioni riportate nella bozza devono appartenere al
+catalogo della degenza. Il file `esito.json` indica la versione del prompt e i
+campi con la formula del dato mancante.
+
+MIMIC-IV-Note contiene le istruzioni di dimissione nelle lettere originali,
+importate come riferimento di valutazione. Nel pacchetto di generazione, una
+terapia alla dimissione può venire dagli ordini `Discharge Med` verificati
+e un controllo può essere riportato se le fonti disponibili lo indicano
+esplicitamente per il periodo dopo la dimissione. Le lettere di riferimento
+restano separate. [Documentazione di MIMIC-IV-Note](https://physionet.org/content/mimic-iv-note/2.2/)
+· [Ordini di farmacia](https://mimic.mit.edu/docs/iv/modules/hosp/pharmacy.html)
+
+Anche un estratto di terapia o di follow-up ottenuto dalla lettera originale
+anticiperebbe il riferimento per quei campi. Le fonti indipendenti sono gli
+ordini di farmacia e gli ordini POE con i relativi dettagli, disponibili
+entro la dimissione. [Ordini POE](https://mimic.mit.edu/docs/iv/modules/hosp/poe.html)
+· [Dettagli POE](https://mimic.mit.edu/docs/iv/modules/hosp/poe_detail.html)
+
+### Audit del campione importato
+
+Dalla cartella del repository, con Docker Desktop avviato:
+
+```bash
+export TESI_PRIVATE_DIR="$HOME/Desktop/codice-tesi-private"
+docker compose build backend-admin &&
+docker compose up -d --wait db &&
+docker compose run --rm --user "$(id -u):$(id -g)" \
+  -v "$TESI_PRIVATE_DIR/datasets/hosp:/mimic/hosp:ro" \
+  backend-admin audit-mimic /mimic/hosp --expect 30
+```
+
+L'audit usa le coppie di paziente e ricovero già importate. Scansiona
+`admissions`, `pharmacy`, `prescriptions`, `poe` e `poe_detail`. Stampa
+conteggi per ricovero in ordine stabile e motivi aggregati. Le colonne
+«recuperabili» contano gli ordini e i dettagli ammissibili con l'estrazione
+corrente che mancano nel pacchetto. I candidati POE sono individuati da
+segnali testuali come `follow-up` e `after discharge`. L'audit usa PostgreSQL
+in sola lettura e i CSV Hosp, mentre le lettere originali restano nel
+percorso di revisione.
+
+Per costruire un campione di verifica con più copertura della terapia, aggiungere
+`--min-discharge-cases 10` a `import-mimic` con `--ed`, `--icu` e `--limit 30`.
+Il selettore privilegia i ricoveri con almeno un ordine `Discharge Med` attivo,
+verificato entro la dimissione e con il farmaco identificato. Mantiene i quattro
+percorsi ED/ICU, i pazienti distinti e il seed. Se la selezione o le fonti estratte
+non rispettano la quota, l'import si ferma prima di scrivere in PostgreSQL. Con
+`--replace`, un import riuscito sostituisce il campione esistente. Il nuovo
+campione sovrarappresenta intenzionalmente i ricoveri con terapia documentata.
+
+Con `--min-complete-cases 5` si riservano cinque posti del percorso con ED e ICU
+a ricoveri che hanno sia un ordine di dimissione utilizzabile sia un ordine POE
+attivo con un segnale di follow-up, registrato entro la dimissione. Questi
+ricoveri contano anche per `--min-discharge-cases`. Il criterio POE seleziona
+candidati da verificare. Con 30 ricoveri, il percorso con ED e ICU ha otto posti.
+Se mancano candidati idonei, l’import segnala quanti pazienti ha trovato e lascia
+il campione PostgreSQL precedente disponibile.
+
+
+### Copertura prima di scegliere il campione
+
+`audit-mimic-candidates /mimic/hosp /mimic/note --ed /mimic/ed --icu /mimic/icu`
+usa gli stessi abbinamenti del selettore e conta pazienti distinti per percorso.
+Verifica la presenza della lettera di riferimento per l'abbinamento. Il testo
+della lettera resta fuori dai criteri di copertura. Il comando usa i CSV in
+sola lettura e non si collega a PostgreSQL.
+
+Nei ricoveri con terapia alla dimissione, separa i segnali POE già ammessi da
+quelli esplorativi relativi ad ambulatori, appuntamenti, invii, rivalutazioni
+e istruzioni di dimissione. Le righe esplorative possono sovrapporsi e
+riguardano i ricoveri senza un segnale già ammesso. Le parole chiave possono
+riferirsi anche alla degenza. Il profilo conta anche la presenza di un motivo
+al triage ED, referti radiologici disponibili entro la dimissione, microbiologia
+e procedure ICD. Con `--extended` scansiona anche laboratorio ed eMAR. Stampa
+soltanto aggregati e non modifica i criteri di importazione.
+
+
+### Campione con fonti estese
+
+Con `--rich-pilot --limit 30 --min-complete-cases 1 --min-discharge-cases 10`,
+il selettore riserva un posto al ricovero con terapia, candidato POE, ED e ICU.
+Per gli altri posti, entro ciascun percorso, conta le famiglie di fonti
+disponibili. Dopo le quote, privilegia copertura, varietà di servizi e diagnosi.
+Il seed risolve le parità residue. CAMPUS mostra etichette come
+**Caso completo** e **Caso ED e ICU 1**, con gli identificativi MIMIC usati
+per gli abbinamenti.
+
+Il profilo esteso conserva gli eventi collegati delle tabelle supportate
+senza i precedenti limiti sul numero di eventi. Restano i controlli sulle
+chiavi e sulla disponibilità entro la dimissione. La lettera originale è
+conservata solo come riferimento. CAMPUS invia il catalogo completo nella
+richiesta iniziale. La finestra effettiva è configurata sul serving e deve
+contenere la richiesta e la risposta. Il registro riporta il numero di
+passaggi disponibili e quello inserito nella richiesta.
+
 
 I test locali verificano il prompt e il formato delle risposte attese su
 destinazione amministrativa isolata, ordine di reparto, codice diagnostico,

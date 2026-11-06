@@ -17,14 +17,20 @@ from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from openai import APIConnectionError, APITimeoutError
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+from pydantic_ai.exceptions import (
+    ModelAPIError,
+    ModelHTTPError,
+    UnexpectedModelBehavior,
+    UsageLimitExceeded,
+)
 
 from codice_tesi.access import LocalIdentity, local_identities
 from codice_tesi.application import run_application
 from codice_tesi.config import ModelConfig, Settings, default_output_dir
-from codice_tesi.discharge.artifacts import DraftContractError
 from codice_tesi.discharge.client import PacketClient
+from codice_tesi.discharge.contracts import DraftContractError
 from codice_tesi.discharge.facts import extract_facts
 from codice_tesi.discharge.limits import (
     EvidenceReadError,
@@ -33,8 +39,14 @@ from codice_tesi.discharge.limits import (
     ModelInactivityError,
     ToolCallValidationError,
 )
-from codice_tesi.discharge.models import CompositionPacket
-from codice_tesi.discharge.provenance import EvidenceCatalog, TraceResult, build_catalog
+from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
+from codice_tesi.discharge.provenance import (
+    EvidenceCatalog,
+    StructuredDraft,
+    TraceResult,
+    build_catalog,
+    visible_sections,
+)
 from codice_tesi.http_auth import require_identity
 from codice_tesi.web_api.drafts import EditorBody, preview_sections
 
@@ -110,13 +122,25 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
         path = directory / "editor.json"
         return json.loads(path.read_text()) if path.exists() else {"revision": 0, "sections": {}}
 
-    def job_at(directory):
+    def job_at(directory, packet):
         state = state_at(directory)
         preview = directory / "preview.json"
         if preview.exists():
             state["preview"] = json.loads(preview.read_text())
         if state["status"] == "completed":
             state["result"] = json.loads((directory / "result.json").read_text())
+        if packet.context.dataset == MIMIC_DATASET:
+            result = state.get("result")
+            draft = StructuredDraft.model_validate(result["draft"]) if result else None
+            state["visible_section_ids"] = [
+                section.id
+                for section in visible_sections(
+                    packet.template,
+                    draft,
+                    dataset=MIMIC_DATASET,
+                    recovered=bool(result and result["validation"]["technical"] == "failed"),
+                )
+            ]
         return state
 
     def catalog_at(directory, packet):
@@ -179,15 +203,20 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
                 ),
                 on_progress=lambda progress: update(**progress),
                 on_text=receive_text,
+                allow_draft_recovery=True,
             )
-            # Il solo risultato strutturato pubblicato dopo i controlli esistenti.
             result = TraceResult.model_validate_json(
                 (artifacts / "bozza_strutturata.json").read_text()
             )
             if result.binding.context_id != packet.context.id:
                 raise ValueError("Risultato fuori contesto.")
             write_json(directory / "result.json", result.model_dump(mode="json"))
-            update(status="completed", phase="completata", detail="Bozza generata, da revisionare.")
+            detail = (
+                "Bozza recuperata. Controlli tecnici non superati."
+                if result.validation.technical == "failed"
+                else "Bozza generata, da revisionare."
+            )
+            update(status="completed", phase="completata", detail=detail)
         except asyncio.CancelledError:
             update(
                 status="interrupted",
@@ -259,13 +288,13 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
                     "La risposta grezza è conservata negli artefatti."
                 ),
             )
-        except DraftContractError:
+        except DraftContractError as exc:
             update(
                 status="failed",
                 phase="risposta_non_valida",
                 failure_code="invalid_draft_contract",
                 detail=(
-                    "La bozza non ha superato i controlli su sezioni, contenuto o citazioni. "
+                    f"La bozza non ha superato i controlli. {exc} "
                     "La risposta grezza è conservata negli artefatti."
                 ),
             )
@@ -291,11 +320,32 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
                     "non è una bozza completata."
                 ),
             )
-        except Exception as exc:
-            logger.error("Generazione fallita: %s", type(exc).__name__)
+        except ModelHTTPError as exc:
             update(
                 status="failed",
-                detail="Generazione non completata. Verificare il serving LLM e gli artefatti.",
+                phase="serving_fallito",
+                failure_code="model_http_error",
+                detail=f"Il serving LLM ha risposto con HTTP {exc.status_code}.",
+            )
+        except (ModelAPIError, APIConnectionError) as exc:
+            cause = exc.__cause__ if isinstance(exc, ModelAPIError) else exc
+            if isinstance(cause, APITimeoutError):
+                code = "model_transport_timeout"
+                detail = "Il collegamento al serving LLM ha superato il tempo di attesa."
+            elif isinstance(cause, APIConnectionError):
+                code = "model_connection_error"
+                detail = "Connessione al serving LLM non riuscita. Verificare rete e servizio."
+            else:
+                code = "model_api_error"
+                detail = "Il serving LLM ha restituito un errore durante la richiesta."
+            update(status="failed", phase="serving_fallito", failure_code=code, detail=detail)
+        except Exception as exc:
+            error_type = type(exc).__name__
+            logger.error("Generazione fallita: %s", error_type)
+            update(
+                status="failed",
+                failure_code="generation_internal_error",
+                detail=f"Generazione non completata per un errore interno ({error_type}).",
             )
 
     @app.get("/health/live")
@@ -326,11 +376,11 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
         directory, packet = session(session_id, identity)
         catalog = catalog_at(directory, packet)
         return {
-            **job_at(directory),
+            **job_at(directory, packet),
             "editor": editor_at(directory),
             "packet": packet.model_dump(mode="json"),
             "catalog": catalog.model_dump(mode="json"),
-            "facts": extract_facts(catalog).model_dump(mode="json"),
+            "facts": extract_facts(catalog, dataset=packet.context.dataset).model_dump(mode="json"),
         }
 
     @app.post("/api/v1/preparazioni/{session_id}/modifiche")
@@ -400,18 +450,18 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
 
     @app.get("/api/v1/preparazioni/{session_id}/stato")
     async def status(session_id: UUID, identity: Identity):
-        directory, _ = session(session_id, identity)
-        return job_at(directory)
+        directory, packet = session(session_id, identity)
+        return job_at(directory, packet)
 
     @app.get("/api/v1/preparazioni/{session_id}/stream")
     async def stream(session_id: UUID, identity: Identity, request: Request):
-        directory, _ = session(session_id, identity)
+        directory, packet = session(session_id, identity)
 
         async def events():
             previous = None
             last_sent = monotonic()
             while not await request.is_disconnected():
-                state = job_at(directory)
+                state = job_at(directory, packet)
                 data = json.dumps(state, ensure_ascii=False)
                 if data != previous:
                     yield f"data: {data}\n\n"

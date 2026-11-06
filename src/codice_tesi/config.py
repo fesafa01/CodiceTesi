@@ -12,7 +12,8 @@ SPARK_OLLAMA_URL = "http://spark-413e.tail9c981a.ts.net:11434/v1"
 DEEPSEEK_MODEL = "deepseek-v4-flash"
 QWEN_MODEL = "qwen3.8:27b"
 GEMMA_MODEL = "gemma4:31b"
-OLLAMA_MODELS = frozenset({QWEN_MODEL, GEMMA_MODEL})
+MISTRAL_MODEL = "frob/mistral-small-4:119b"
+OLLAMA_MODELS = frozenset({QWEN_MODEL, GEMMA_MODEL, MISTRAL_MODEL})
 
 
 def default_output_dir() -> Path:
@@ -52,7 +53,7 @@ class ModelConfig(BaseModel):
     max_tool_calls: int = Field(default=6, ge=1, le=30)
     tool_validation_retries: int = Field(default=1, ge=0, le=1)
     max_tool_result_bytes: int = Field(default=24000, ge=1024, le=100000)
-    total_tokens_limit: int = Field(default=120000, gt=0)
+    total_tokens_limit: int | None = Field(default=None, gt=0)
 
     def request_settings(self) -> OpenAIChatModelSettings:
         """Traduce i nomi del server nei campi PydanticAI, omettendo quelli non impostati."""

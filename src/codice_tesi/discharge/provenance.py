@@ -5,11 +5,12 @@ import re
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationError, model_validator
+from pydantic_core import from_json
 
-from codice_tesi.discharge.contracts import Contract
+from codice_tesi.discharge.contracts import Contract, DraftContractError
 from codice_tesi.discharge.facts import FactInventory
-from codice_tesi.discharge.models import CompositionPacket, EvidenceSource
+from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket, EvidenceSource
 from codice_tesi.discharge.segmentation import SEGMENTATION_VERSION, source_intervals
 from codice_tesi.discharge.template import MISSING_VALUE, LetterTemplate, SectionDefinition
 
@@ -174,7 +175,7 @@ def _unique_json_keys(pairs):
     result = {}
     for key, value in pairs:
         if key in result:
-            raise ValueError("Chiave JSON duplicata nella risposta.")
+            raise DraftContractError("La risposta contiene una chiave JSON duplicata.")
         result[key] = value
     return result
 
@@ -191,6 +192,75 @@ def draft_json_text(raw: str, *, partial: bool = False) -> str:
             if partial:
                 return body
     return text
+
+
+def partial_draft_sections(raw: str) -> list:
+    try:
+        data = from_json(
+            draft_json_text(raw, partial=True),
+            allow_partial="trailing-strings",
+            cache_strings=False,
+        )
+    except ValueError:
+        return []
+    if isinstance(data, dict) and isinstance(data.get("sections"), list):
+        return data["sections"]
+    return []
+
+
+def recover_draft(
+    raw: str, catalog: EvidenceCatalog, template: LetterTemplate, *, dataset: str | None = None
+) -> StructuredDraft | None:
+    """Recupera il testo per ID canonico e mantiene solo i riferimenti risolvibili."""
+    canonical_ids = {definition.id for definition in template.sections}
+    if dataset == MIMIC_DATASET:
+        canonical_ids.discard("medici")
+    evidence_sources = {evidence.id: evidence.source_id for evidence in catalog.evidences}
+    recovered = {}
+    for item in partial_draft_sections(raw):
+        if not isinstance(item, dict):
+            continue
+        section_id, body = item.get("section_id"), item.get("text")
+        if (
+            not isinstance(section_id, str)
+            or section_id not in canonical_ids
+            or section_id in recovered
+            or not isinstance(body, str)
+            or not body.strip()
+        ):
+            continue
+        citations: dict[str, dict[str, None]] = {}
+        if body.strip() != MISSING_VALUE and isinstance(item.get("sources"), list):
+            for reference in item["sources"]:
+                if not isinstance(reference, dict):
+                    continue
+                source_id = reference.get("source_id")
+                ids = reference.get("evidence_ids")
+                if not isinstance(source_id, str) or not isinstance(ids, list):
+                    continue
+                for evidence_id in ids:
+                    if (
+                        isinstance(evidence_id, str)
+                        and evidence_sources.get(evidence_id) == source_id
+                    ):
+                        citations.setdefault(source_id, {})[evidence_id] = None
+        recovered[section_id] = DraftSection(
+            section_id=section_id,
+            text=body,
+            sources=tuple(
+                Citation(source_id=source_id, evidence_ids=tuple(ids))
+                for source_id, ids in citations.items()
+            ),
+        )
+    if not any(section.text.strip() != MISSING_VALUE for section in recovered.values()):
+        return None
+    return StructuredDraft(
+        sections=tuple(
+            recovered.get(definition.id)
+            or DraftSection(section_id=definition.id, text="", sources=())
+            for definition in template.sections
+        )
+    )
 
 
 def _only_missing_fields(text: str, definition: SectionDefinition) -> bool:
@@ -215,45 +285,146 @@ def _only_missing_fields(text: str, definition: SectionDefinition) -> bool:
     return seen == labels
 
 
-def parse_draft(raw: str, catalog: EvidenceCatalog, template: LetterTemplate) -> StructuredDraft:
-    """Convalida sezioni e riferimenti senza modificare il contenuto del modello."""
-    draft = StructuredDraft.model_validate(
-        json.loads(draft_json_text(raw), object_pairs_hook=_unique_json_keys)
-    )
+def _complete_mimic_draft(draft: StructuredDraft, template: LetterTemplate) -> StructuredDraft:
+    provided = {section.section_id: section for section in draft.sections}
+    if len(provided) != len(draft.sections) or provided.keys() - {s.id for s in template.sections}:
+        raise DraftContractError("La risposta contiene sezioni duplicate o sconosciute.")
+
+    completed: dict[str, DraftSection] = {}
+    for definition in template.sections:
+        section = provided.get(definition.id) if definition.id != "medici" else None
+        text = section.text.strip() if section else ""
+        if (
+            section
+            and section.sources
+            and text
+            and text != MISSING_VALUE
+            and not _only_missing_fields(text, definition)
+        ):
+            completed[definition.id] = section
+            continue
+
+        required = definition.requirement.status in {"required", "unconfirmed"}
+        if definition.id == "terapia_dimissione":
+            required = False
+        if condition := definition.applies_when:
+            answer = completed[condition.section_id].text.strip().casefold()
+            required = answer in ({"sì", "si"} if condition.equals else {"no"})
+        completed[definition.id] = DraftSection(
+            section_id=definition.id, text=MISSING_VALUE if required else "", sources=()
+        )
+    return StructuredDraft(sections=tuple(completed.values()))
+
+
+def parse_draft(
+    raw: str, catalog: EvidenceCatalog, template: LetterTemplate, *, dataset: str | None = None
+) -> StructuredDraft:
+    """Convalida le citazioni e, se richiesto, rende esplicite le lacune della bozza."""
+    try:
+        draft = StructuredDraft.model_validate(
+            json.loads(draft_json_text(raw), object_pairs_hook=_unique_json_keys)
+        )
+    except ValidationError as exc:
+        errors = exc.errors(include_input=False, include_context=False, include_url=False)
+        location = errors[0]["loc"]
+        if len(location) >= 2 and location[0] == "sections" and type(location[1]) is int:
+            raise DraftContractError(
+                f"La voce {location[1] + 1} di sections ha campi o citazioni in formato non valido."
+            ) from exc
+        raise DraftContractError("La risposta non rispetta lo schema JSON delle sezioni.") from exc
+    if dataset == MIMIC_DATASET:
+        draft = _complete_mimic_draft(draft, template)
     if [section.section_id for section in draft.sections] != [s.id for s in template.sections]:
-        raise ValueError("Le sezioni JSON devono essere tutte presenti una volta in ordine.")
+        raise DraftContractError("Le sezioni JSON devono comparire tutte una volta e in ordine.")
     sources = {source.id: source for source in catalog.sources}
     evidences = {evidence.id: evidence for evidence in catalog.evidences}
     for section, definition in zip(draft.sections, template.sections, strict=True):
         text = section.text.strip()
-        if not text and definition.requirement.status in {"required", "unconfirmed"}:
-            raise ValueError("Sezione obbligatoria vuota: usare la formula del dato mancante.")
+        label = definition.title
+        therapy_with_review = dataset == MIMIC_DATASET and definition.id == "terapia_dimissione"
+        if (
+            not text
+            and not therapy_with_review
+            and definition.requirement.status in {"required", "unconfirmed"}
+        ):
+            raise DraftContractError(f"«{label}» è obbligatoria e risulta vuota.")
         if not text or text == MISSING_VALUE or _only_missing_fields(text, definition):
             if section.sources:
-                raise ValueError("Una sezione vuota o interamente indisponibile non cita fonti.")
+                raise DraftContractError(f"«{label}» cita testo interamente indisponibile.")
         elif not section.sources:
-            raise ValueError("Sezione con contenuto senza citazioni.")
+            raise DraftContractError(f"«{label}» contiene testo senza citazioni.")
         for citation in section.sources:
             if citation.source_id not in sources:
-                raise ValueError("Citazione di una fonte sconosciuta.")
+                raise DraftContractError(f"«{label}» cita una fonte sconosciuta.")
             for evidence_id in citation.evidence_ids:
                 evidence = evidences.get(evidence_id)
                 if evidence is None:
-                    raise ValueError("Citazione di un'evidenza sconosciuta.")
+                    raise DraftContractError(f"«{label}» cita un'evidenza sconosciuta.")
                 if evidence.source_id != citation.source_id:
-                    raise ValueError("L'evidenza citata appartiene a un'altra fonte.")
+                    raise DraftContractError(f"«{label}» cita un'evidenza di un'altra fonte.")
     return draft
 
 
-def render_draft(draft: StructuredDraft, template: LetterTemplate) -> str:
+def visible_sections(
+    template: LetterTemplate,
+    draft: StructuredDraft | None,
+    *,
+    dataset: str | None,
+    recovered: bool = False,
+) -> tuple[SectionDefinition, ...]:
+    """Applica alla vista MIMIC la disponibilità di dati senza alterare il template."""
+    if dataset != MIMIC_DATASET:
+        return template.sections
+
+    by_id = {section.section_id: section for section in draft.sections} if draft else {}
+    answer = by_id.get("istologico_in_attesa")
+    details = by_id.get("informazioni_istologico")
+    answer_text = answer.text.strip().casefold() if answer and answer.sources else ""
+    hidden = {"medici"}
+    if answer_text not in {"sì", "si", "no"}:
+        hidden.add("istologico_in_attesa")
+    if (
+        answer_text not in {"sì", "si"}
+        or not details
+        or not details.sources
+        or details.text.strip() in {"", MISSING_VALUE}
+    ):
+        hidden.add("informazioni_istologico")
+    if recovered:
+        hidden.difference_update(
+            section_id
+            for section_id in ("istologico_in_attesa", "informazioni_istologico")
+            if section_id in by_id and by_id[section_id].text.strip() not in {"", MISSING_VALUE}
+        )
+    return tuple(section for section in template.sections if section.id not in hidden)
+
+
+def _visible_draft_sections(draft, template, dataset, *, recovered=False):
+    visible = visible_sections(template, draft, dataset=dataset, recovered=recovered)
+    ids = {section.id for section in visible}
+    return (
+        (definition, section)
+        for definition, section in zip(template.sections, draft.sections, strict=True)
+        if definition.id in ids
+    )
+
+
+def render_draft(
+    draft: StructuredDraft,
+    template: LetterTemplate,
+    *,
+    dataset: str | None = None,
+    recovered: bool = False,
+) -> str:
     """Intestazioni applicative canoniche, testo clinico separato dai riferimenti."""
     return (
         DRAFT_TITLE
+        + (" — CONTROLLI TECNICI NON SUPERATI" if recovered else "")
         + "\n"
         + "\n".join(
             f"{index}. {definition.title}\n{section.text}\n"
             for index, (definition, section) in enumerate(
-                zip(template.sections, draft.sections, strict=True), 1
+                _visible_draft_sections(draft, template, dataset, recovered=recovered), 1
             )
         )
     )
@@ -283,7 +454,13 @@ def render_evidences(result: TraceResult, template: LetterTemplate) -> str:
         "",
     ]
     for index, (definition, section) in enumerate(
-        zip(template.sections, result.draft.sections, strict=True), 1
+        _visible_draft_sections(
+            result.draft,
+            template,
+            result.binding.dataset.id,
+            recovered=result.validation.technical == "failed",
+        ),
+        1,
     ):
         lines.extend([f"## {index}. {definition.title}", "", _literal_block(section.text), ""])
         if not section.sources:

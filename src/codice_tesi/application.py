@@ -22,6 +22,7 @@ from codice_tesi.discharge.provenance import EvidenceCatalog
 from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfig
 from codice_tesi.observability.model_spans import agent_attributes, prompt_attributes
 from codice_tesi.observability.spark import SPARK_HOSTS, capture_run
+from codice_tesi.observability.spark_archive import ARCHIVE_VERSION
 from codice_tesi.observability.telemetry import Telemetry, TelemetryConfig
 
 
@@ -51,6 +52,7 @@ async def run_application(
     on_progress: Callable[[dict], None] | None = None,
     on_text: Callable[[str, bool], None] | None = None,
     catalog: EvidenceCatalog | None = None,
+    allow_draft_recovery: bool = False,
 ) -> Path:
     if packet is not None:
         if context_id is not None and context_id != packet.context.id:
@@ -150,7 +152,8 @@ async def run_application(
                     record.data["status"] = "running"
                     record.save()
                     with artifacts.open_draft(
-                        validation_context=lambda: telemetry.stage(record, "validate_and_save")
+                        validation_context=lambda: telemetry.stage(record, "validate_and_save"),
+                        allow_recovery=allow_draft_recovery,
                     ) as output:
                         async with api.create_client(model_settings) as client:
                             generator = LLMDraftGenerator(config, client)
@@ -206,6 +209,9 @@ async def run_application(
                     notify("controllo_risultato")
                     artifacts.finish("bozza_da_revisionare", usage=generator.usage)
                     record.data["draft_sha256"] = sha256(artifacts.draft.read_bytes()).hexdigest()
+                    record.data["draft_technical_validation"] = artifacts.report["tracciabilita"][
+                        "technical"
+                    ]
                     record.data["artifact_hashes"] = dict(artifacts.report["artefatti_sha256"])
                     record.finish("completed", llm=generator.usage.get("metrics"))
                     return artifacts.directory
@@ -248,6 +254,7 @@ async def run_application(
         finally:
             if not dry_run and packet and packet.context.dataset == MIMIC_DATASET:
                 record.data["test_spark"] = {
+                    "archive_version": ARCHIVE_VERSION,
                     "context_id": packet.context.id,
                     "dataset_version": packet.context.dataset_version,
                     "artifact_directory": (
