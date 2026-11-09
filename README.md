@@ -23,6 +23,8 @@ Dalla cartella estratta, copiare `.env.example` in `.env` se il file non esiste
 e configurare modello ed endpoint. `LLM_OLLAMA_BASE_URL` deve essere raggiungibile
 **dai container**: con Ollama sul computer locale usare
 `http://host.docker.internal:11434/v1`. Il default del progetto punta allo Spark.
+Per MIMIC il generatore accetta solo loopback, il computer host Docker o gli
+endpoint Spark del progetto; gli altri endpoint remoti sono bloccati.
 
 I dati restano in una cartella privata esterna alla repo. Impostare
 `TESI_PRIVATE_DIR` con un percorso assoluto se non si usa la cartella sorella

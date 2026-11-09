@@ -144,7 +144,8 @@ async def run_application(
                         packet.context.dataset == MIMIC_DATASET
                         and str(model_settings.base_url).rstrip("/")
                         not in {SPARK_LLM_URL, SPARK_OLLAMA_URL}
-                        and model_settings.base_url.host not in {"127.0.0.1", "[::1]", "localhost"}
+                        and model_settings.base_url.host
+                        not in {"127.0.0.1", "[::1]", "localhost", "host.docker.internal"}
                     ):
                         raise ValueError(
                             "Per MIMIC usare un serving locale o lo Spark configurato."

@@ -8,6 +8,8 @@ services:
       context: .
       target: agent-api
     init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: .env
         required: false

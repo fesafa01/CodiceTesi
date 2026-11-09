@@ -20,6 +20,45 @@ from codice_tesi.observability.execution import ExecutionRecord, ExperimentConfi
 from codice_tesi.observability.telemetry import TelemetryConfig
 
 
+@pytest.mark.parametrize(
+    ("url", "allowed"),
+    [
+        ("http://host.docker.internal:11434/v1", True),
+        ("http://127.0.0.1:8000/v1", True),
+        (SPARK_LLM_URL, True),
+        ("https://example.com/v1", False),
+        ("https://host.docker.internal.example.com/v1", False),
+    ],
+)
+def test_mimic_uses_only_local_or_project_serving(
+    tmp_path, monkeypatch, packet_factory, url, allowed
+):
+    class ClientReached(Exception):
+        pass
+
+    calls = []
+
+    def client(settings):
+        calls.append(str(settings.base_url))
+        raise ClientReached
+
+    monkeypatch.setattr(application.api, "create_client", client)
+    packet = packet_factory("nota")
+    packet = packet.model_copy(
+        update={"context": packet.context.model_copy(update={"dataset": MIMIC_DATASET})}
+    )
+    with pytest.raises(ClientReached if allowed else ValueError):
+        asyncio.run(
+            application.run_application(
+                backend_url="http://fixture",
+                packet=packet,
+                output_dir=tmp_path,
+                settings=Settings(base_url=url, _env_file=None),
+            )
+        )
+    assert bool(calls) is allowed
+
+
 def test_registry_correlates_artifacts_and_exports_without_clinical_text(
     tmp_path,
     packet_factory,
