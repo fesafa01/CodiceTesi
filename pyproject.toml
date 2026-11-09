@@ -1,6 +1,6 @@
 [project]
 name = "codice-tesi"
-version = "0.1.0"
+version = "0.2.0"
 description = "Prototipo di supporto documentale clinico con PydanticAI e modelli via Tailscale"
 readme = "README.md"
 authors = [

@@ -149,6 +149,7 @@ class TraceResult(Contract):
     draft: StructuredDraft
     validation: TraceValidation
     facts: FactInventory = Field(default_factory=FactInventory)
+    raw_draft_text: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def matching_context(self):
@@ -194,33 +195,52 @@ def draft_json_text(raw: str, *, partial: bool = False) -> str:
     return text
 
 
-def partial_draft_sections(raw: str) -> list:
+def _partial_draft_payload(raw: str):
     try:
-        data = from_json(
+        return from_json(
             draft_json_text(raw, partial=True),
             allow_partial="trailing-strings",
             cache_strings=False,
         )
     except ValueError:
-        return []
+        return None
+
+
+def partial_draft_sections(raw: str) -> list:
+    data = _partial_draft_payload(raw)
     if isinstance(data, dict) and isinstance(data.get("sections"), list):
         return data["sections"]
     return []
 
 
+def _recovery_items(raw: str):
+    data = _partial_draft_payload(raw)
+    if isinstance(data, dict):
+        data = data.get("sections", data)
+    if isinstance(data, list):
+        yield from data
+    elif isinstance(data, dict):
+        for section_id, item in data.items():
+            if isinstance(item, str):
+                yield {"section_id": section_id, "text": item}
+            elif isinstance(item, dict):
+                yield {**item, "section_id": section_id}
+
+
 def recover_draft(
     raw: str, catalog: EvidenceCatalog, template: LetterTemplate, *, dataset: str | None = None
-) -> StructuredDraft | None:
+) -> StructuredDraft:
     """Recupera il testo per ID canonico e mantiene solo i riferimenti risolvibili."""
     canonical_ids = {definition.id for definition in template.sections}
     if dataset == MIMIC_DATASET:
         canonical_ids.discard("medici")
     evidence_sources = {evidence.id: evidence.source_id for evidence in catalog.evidences}
     recovered = {}
-    for item in partial_draft_sections(raw):
+    for item in _recovery_items(raw):
         if not isinstance(item, dict):
             continue
-        section_id, body = item.get("section_id"), item.get("text")
+        section_id = item.get("section_id", item.get("id"))
+        body = item.get("text", item.get("content"))
         if (
             not isinstance(section_id, str)
             or section_id not in canonical_ids
@@ -252,8 +272,6 @@ def recover_draft(
                 for source_id, ids in citations.items()
             ),
         )
-    if not any(section.text.strip() != MISSING_VALUE for section in recovered.values()):
-        return None
     return StructuredDraft(
         sections=tuple(
             recovered.get(definition.id)
@@ -285,7 +303,9 @@ def _only_missing_fields(text: str, definition: SectionDefinition) -> bool:
     return seen == labels
 
 
-def _complete_mimic_draft(draft: StructuredDraft, template: LetterTemplate) -> StructuredDraft:
+def _complete_mimic_draft(
+    draft: StructuredDraft, template: LetterTemplate, *, reject_uncited: bool
+) -> StructuredDraft:
     provided = {section.section_id: section for section in draft.sections}
     if len(provided) != len(draft.sections) or provided.keys() - {s.id for s in template.sections}:
         raise DraftContractError("La risposta contiene sezioni duplicate o sconosciute.")
@@ -296,7 +316,7 @@ def _complete_mimic_draft(draft: StructuredDraft, template: LetterTemplate) -> S
         text = section.text.strip() if section else ""
         if (
             section
-            and section.sources
+            and (section.sources or reject_uncited)
             and text
             and text != MISSING_VALUE
             and not _only_missing_fields(text, definition)
@@ -316,8 +336,55 @@ def _complete_mimic_draft(draft: StructuredDraft, template: LetterTemplate) -> S
     return StructuredDraft(sections=tuple(completed.values()))
 
 
+def repair_mimic_references(raw: str, catalog: EvidenceCatalog) -> str | None:
+    """Normalizza riferimenti risolvibili senza aggiungere testo o evidenze."""
+    payload = json.loads(draft_json_text(raw), object_pairs_hook=_unique_json_keys)
+    if not isinstance(payload, dict) or not isinstance(payload.get("sections"), list):
+        return None
+    owners = {item.id: item.source_id for item in catalog.evidences}
+    changed = False
+    for section in payload["sections"]:
+        if not isinstance(section, dict) or not isinstance(section.get("sources"), list):
+            return None
+        sources = section["sources"]
+        if section.get("section_id") == "istologico_in_attesa" and not sources:
+            if isinstance(section.get("text"), str) and section["text"].strip() not in {
+                "",
+                MISSING_VALUE,
+            }:
+                section["text"] = MISSING_VALUE
+                changed = True
+        grouped: dict[str, dict[str, None]] = {}
+        for citation in sources:
+            if (
+                not isinstance(citation, dict)
+                or citation.keys() != {"source_id", "evidence_ids"}
+                or not isinstance(citation["source_id"], str)
+                or not isinstance(citation["evidence_ids"], list)
+                or not citation["evidence_ids"]
+            ):
+                return None
+            for evidence in citation["evidence_ids"]:
+                if not isinstance(evidence, str) or evidence not in owners:
+                    return None
+                grouped.setdefault(owners[evidence], {})[evidence] = None
+        normalized = [
+            {"source_id": source, "evidence_ids": list(evidences)}
+            for source, evidences in grouped.items()
+        ]
+        if normalized != sources:
+            section["sources"] = normalized
+            changed = True
+    return json.dumps(payload, ensure_ascii=False) if changed else None
+
+
 def parse_draft(
-    raw: str, catalog: EvidenceCatalog, template: LetterTemplate, *, dataset: str | None = None
+    raw: str,
+    catalog: EvidenceCatalog,
+    template: LetterTemplate,
+    *,
+    dataset: str | None = None,
+    reject_uncited: bool = False,
 ) -> StructuredDraft:
     """Convalida le citazioni e, se richiesto, rende esplicite le lacune della bozza."""
     try:
@@ -333,7 +400,7 @@ def parse_draft(
             ) from exc
         raise DraftContractError("La risposta non rispetta lo schema JSON delle sezioni.") from exc
     if dataset == MIMIC_DATASET:
-        draft = _complete_mimic_draft(draft, template)
+        draft = _complete_mimic_draft(draft, template, reject_uncited=reject_uncited)
     if [section.section_id for section in draft.sections] != [s.id for s in template.sections]:
         raise DraftContractError("Le sezioni JSON devono comparire tutte una volta e in ordine.")
     sources = {source.id: source for source in catalog.sources}
@@ -415,19 +482,20 @@ def render_draft(
     *,
     dataset: str | None = None,
     recovered: bool = False,
+    raw_draft_text: str | None = None,
 ) -> str:
     """Intestazioni applicative canoniche, testo clinico separato dai riferimenti."""
-    return (
-        DRAFT_TITLE
-        + (" — CONTROLLI TECNICI NON SUPERATI" if recovered else "")
-        + "\n"
-        + "\n".join(
+    title = DRAFT_TITLE + (" — CONTROLLI TECNICI NON SUPERATI" if recovered else "")
+    sections = tuple(_visible_draft_sections(draft, template, dataset, recovered=recovered))
+    text = title + "\n"
+    if raw_draft_text is None or any(section.text.strip() for _, section in sections):
+        text += "\n".join(
             f"{index}. {definition.title}\n{section.text}\n"
-            for index, (definition, section) in enumerate(
-                _visible_draft_sections(draft, template, dataset, recovered=recovered), 1
-            )
+            for index, (definition, section) in enumerate(sections, 1)
         )
-    )
+    if raw_draft_text is not None:
+        text += f"\nRISPOSTA ORIGINALE DEL MODELLO\n\n{raw_draft_text}"
+    return text
 
 
 def _literal_block(text: str) -> str:

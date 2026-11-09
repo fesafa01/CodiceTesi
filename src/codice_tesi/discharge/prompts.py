@@ -9,8 +9,9 @@ from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
 from codice_tesi.discharge.provenance import EvidenceCatalog, build_catalog
 from codice_tesi.discharge.template import LetterTemplate
 
-PROMPT_VERSION = "campus-stesura-v23-date-italiano-eta"
-MIMIC_PROMPT_VERSION = "campus-mimic-v11"
+PROMPT_VERSION = "campus-stesura-v25-json"
+MIMIC_PROMPT_VERSION = "campus-mimic-v15"
+MIMIC_TOOL_PROMPT_VERSION = "campus-mimic-v15-tools-v1"
 
 INSTRUCTIONS = """# Priorità operative
 Applica queste priorità nell'ordine:
@@ -67,7 +68,8 @@ destinazione, recapiti o firma medica senza evidenza.
 Conserva i dati supportati anche quando manca un loro attributo; segnala la
 lacuna specifica senza cancellare le altre informazioni utili.
 Se una sezione obbligatoria o con obbligatorietà da confermare è interamente
-priva di dati, scrivi soltanto: Non disponibile nelle note fornite.
+priva di dati, scrivi soltanto «Non disponibile nelle note fornite.»,
+salvo le eccezioni esplicite della guida per il dataset.
 Se una sezione facoltativa non ha contenuto, mantieni l'intestazione e lascia
 vuoto il testo. Facoltativo non significa omettere informazioni pertinenti disponibili.
 Per le sezioni condizionali applica la condizione indicata nella guida.
@@ -88,14 +90,19 @@ anche etichette, descrizioni dei codici, risultati e stati degli ordini. Corregg
 i refusi e rimuovi suffissi ontologici come disorder, finding e situation.
 Conserva nomi propri, marchi, sigle standard, identificativi, codici, valori e unità.
 Traduci un principio attivo soltanto quando la sua identità è certa.
-Nelle sezioni narrative usa frasi complete. Sviluppa in particolare il motivo del
-ricovero, gli accertamenti e trattamenti e il decorso. Per ciascun passaggio integra
-i dettagli pertinenti disponibili, come il momento, lo stato della procedura o
-l'esito. Quando una data è documentata per un evento che riporti, scrivila
-esplicitamente con la precisione disponibile. Usa «il giorno successivo» o altri
-riferimenti relativi solo se manca una data esplicita e l'ordine è verificabile.
-Quando le fonti descrivono più fasi, dedica a ciascuna un paragrafo. Quando i dati
-sono pochi, basta una frase precisa.
+Nelle sezioni narrative usa frasi complete e sviluppa il testo in proporzione
+ai fatti pertinenti documentati. Nel motivo del ricovero descrivi la presentazione
+iniziale e il contesto clinico disponibile. Per gli accertamenti e i trattamenti
+spiega che cosa è stato richiesto, eseguito o somministrato e riporta le indicazioni
+e gli esiti attestati. Nel decorso racconta i passaggi della degenza in ordine
+verificabile, distinguendo osservazioni, interventi e decisioni.
+Quando sono documentati più passaggi pertinenti, descrivili in frasi distinte e
+raggruppali in paragrafi per fase. Conserva i dettagli che permettono al lettore
+di capire che cosa è accaduto, compresi tempi, risultati e stato degli interventi.
+Quando una data è documentata per un evento che riporti, scrivila esplicitamente
+con la precisione disponibile. Usa «il giorno successivo» o altri riferimenti
+relativi solo se manca una data esplicita e l'ordine è verificabile.
+Usa una sola frase quando i fatti pertinenti si esauriscono in un unico punto.
 Evita ripetizioni, formule di riempimento e raccordi che suggeriscano cause,
 intenzioni o conseguenze non documentate.
 Riserva gli elenchi a codici, risultati, prescrizioni e recapiti. L'epicrisi può
@@ -114,6 +121,9 @@ Esempio di una singola sezione, da completare con le altre sezioni della guida:
 {"sections":[{"section_id":"esami_laboratorio","text":"Testo della sezione.",
 "sources":[{"source_id":"ID_FONTE_ESISTENTE","evidence_ids":["ID_EVIDENZA_ESISTENTE"]}]}]}
 Il software aggiunge titolo e intestazioni: non inserirli nel testo delle sezioni.
+Nei valori text rappresenta gli a capo con \\n e proteggi le virgolette interne
+con \\". Usa stringhe JSON anche per Sì e No. Chiudi tutte le stringhe e le
+parentesi prima di terminare la risposta.
 
 # Citazioni delle fonti
 Per ogni sezione con fatti documentati cita le evidenze pertinenti del catalogo.
@@ -136,6 +146,20 @@ Il pacchetto contiene un estratto della degenza con record strutturati e, se
 disponibili, referti radiologici. La lettera originale è riservata al confronto.
 Usa l'origine di ciascuna fonte per decidere che cosa il passaggio attesta.
 
+# Costruzione delle citazioni
+Ogni fonte include RIFERIMENTI AMMESSI, con source_id e l'elenco degli evidence_ids
+che le appartengono. Per citare un fatto, copia il source_id di quella fonte e
+scegli soltanto gli evidence_ids dei passaggi che sostengono il fatto.
+Conserva ogni carattere degli ID, inclusi prefissi, trattini e zeri iniziali.
+Gli ID di pazienti, ricoveri, note, ordini, campioni e record presenti nel testo
+clinico non sono evidence_ids del catalogo. Non costruire nuovi ID, intervalli di
+ID o abbreviazioni e non copiare i segnaposto dell'esempio di formato.
+Per ciascuna sezione crea una sola voce per source_id e raccogli in evidence_ids
+tutti i passaggi pertinenti di quella fonte, eliminando le ripetizioni.
+Usa ogni section_id canonico una sola volta. Se mancano i dati, applica la
+formula prevista per quella sezione con sources vuoto. Se il testo afferma un
+fatto, verifica i riferimenti prima di consegnare la risposta.
+
 Scrivi una lettera italiana anche quando tutte le fonti sono inglesi. Traduci nel
 campo text diagnosi, intestazioni interne, descrizioni dei codici, esiti, stati
 degli ordini e destinazioni. Per esempio, scrivi «dispnea» per «shortness of
@@ -157,11 +181,6 @@ indicazioni successive, nella misura attestata dalle fonti.
   iniziali. Le diagnosi ED appartengono a quella fase del percorso. ed/medrecon
   descrive i farmaci riferiti all'ingresso ed ed/pyxis registra un prelievo
   dal dispensatore. Mantieni distinte queste fonti dalla terapia finale.
-- Le fonti icu/ descrivono permanenze e registrazioni di terapia intensiva.
-  Conserva tempi, valori, unità e stato delle procedure e delle infusioni.
-  Le righe ingredientevents descrivono i componenti di un'infusione. Evita
-  di sommarle agli inputevents come se fossero somministrazioni aggiuntive.
-  Le misure durante la permanenza descrivono il decorso ICU.
 - In Condizione clinica alla dimissione, riporta discharge_location come destinazione
   amministrativa. Se è l'unico dato disponibile, riporta la destinazione e segnala
   che lo stato clinico alla dimissione non è documentato. Non dedurre stabilità,
@@ -198,12 +217,21 @@ indicazioni successive, nella misura attestata dalle fonti.
   amministrativo. Gli ordini POE documentano richiesta, stato o annullamento.
   Per affermare che una prestazione è stata eseguita serve evidenza specifica.
 - In hosp/labevents, riporta valore, unità e data. Nella sezione laboratorio
-  usa l'ultimo valore disponibile per esame. Nell'epicrisi puoi confrontare
-  misure datate dello stesso item, campione e unità senza giudizi clinici.
+  scegli i risultati pertinenti al motivo, agli accertamenti o al decorso
+  documentato e usa l'ultimo risultato disponibile per ogni esame scelto.
+  Nell'epicrisi puoi riportare due misure datate dello stesso esame, campione
+  e unità senza dedurne un miglioramento clinico o una risposta alla terapia.
   In microbiologia mantieni associati campione, test, organismo e sensibilità.
 - Una biopsia senza esito documentato non dimostra che l'istologico sia in attesa
   né che sia concluso. Senza uno stato esplicito alla dimissione, usa la formula
   del dato mancante nel campo binario e lascia vuote le informazioni sull'istologico.
+"""
+
+MIMIC_ICU_GUIDE = """- Le fonti icu/ descrivono permanenze e registrazioni di terapia intensiva.
+  Conserva tempi, valori, unità e stato delle procedure e delle infusioni.
+  Le righe ingredientevents descrivono i componenti di un'infusione. Evita
+  di sommarle agli inputevents come se fossero somministrazioni aggiuntive.
+  Le misure durante la permanenza descrivono il decorso ICU.
 """
 
 MIMIC_CODE_SOURCES = {
@@ -363,7 +391,8 @@ Prima di consegnare la lettera verifica:
 - Non hai inventato terapie, dosaggi, eventi del decorso, esiti o nessi causali.
 - Nel laboratorio ciascun esame compare con un solo risultato, senza pannelli giornalieri.
 - Hai mantenuto le 17 intestazioni, le lacune necessarie e la condizione dell'istologico.
-- Le sezioni narrative sono discorsive; codici, risultati e prescrizioni restano leggibili.
+- Le sezioni narrative sviluppano i passaggi pertinenti con i dettagli attestati
+  e citano le evidenze che li sostengono. Codici, risultati e prescrizioni restano leggibili.
 Correggi soltanto la stesura sulla base delle fonti. Non mostrare questo controllo.
 """
 
@@ -376,12 +405,16 @@ def _text_rule(instruction: str) -> str:
     )
 
 
-def build_instructions(template: LetterTemplate, *, dataset: str | None = None) -> str:
+def build_instructions(
+    template: LetterTemplate, *, dataset: str | None = None, has_icu_sources: bool = False
+) -> str:
     """Combina priorità e guide per sezione conservando requisiti e titoli canonici."""
     mimic = dataset == MIMIC_DATASET
     lines = [INSTRUCTIONS]
     if mimic:
         lines.append(MIMIC_GUIDE)
+        if has_icu_sources:
+            lines.append(MIMIC_ICU_GUIDE)
     lines.append("# CAMPI CAMPUS DA REDIGERE IN ORDINE")
     for index, section in enumerate(template.sections, 1):
         if mimic and section.id == "medici":
@@ -410,9 +443,11 @@ def build_instructions(template: LetterTemplate, *, dataset: str | None = None) 
         elif mimic and section.id == "decorso":
             guidance = SectionGuidance(
                 guidance.purpose,
-                "Scrivi una sintesi anche di una sola frase quando le evidenze sono sparse. "
-                "Collega in ordine verificabile solo gli eventi attestati. Distingui "
-                "trasferimenti, referti e ordini dalle decisioni cliniche documentate.",
+                "Descrivi in frasi distinte i passaggi pertinenti attestati, anche quando "
+                "provengono da fonti diverse. Raggruppali per fase in ordine verificabile. "
+                "Distingui trasferimenti, referti e ordini dalle decisioni cliniche documentate. "
+                "Per descrivere un confronto di laboratorio conserva le due date e i valori "
+                "originali; usa qualifiche cliniche solo se esplicitamente documentate.",
                 guidance.avoid,
             )
         elif mimic and section.id == "terapia_dimissione":
@@ -425,6 +460,14 @@ def build_instructions(template: LetterTemplate, *, dataset: str | None = None) 
                 guidance.avoid,
             )
             content += ' In assenza di prescrizioni finali esplicite usa text="" e sources=[].'
+        elif mimic and section.id == "esami_laboratorio":
+            guidance = SectionGuidance(
+                guidance.purpose,
+                "Riporta un risultato per ogni esame pertinente alla sintesi clinica. "
+                "Scegli l'ultimo disponibile entro la dimissione con valore, unità e data. "
+                "Distingui campioni o metodi diversi e conserva le date dei singoli risultati.",
+                guidance.avoid,
+            )
         lines.extend(
             [
                 f"{index}. {section.title}",
@@ -480,6 +523,17 @@ def build_prompt(
         lines.append(f"INIZIO NOTA {source.id} (tipo: {source.kind})")
         if packet.context.dataset == MIMIC_DATASET:
             lines.append("Origine: " + json.dumps(source.origin, ensure_ascii=False))
+            lines.append(
+                "RIFERIMENTI AMMESSI "
+                + json.dumps(
+                    {
+                        "source_id": source.id,
+                        "evidence_ids": [evidence.id for evidence in by_source[source.id]],
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            )
         for evidence in by_source[source.id]:
             lines.extend(
                 [
@@ -512,7 +566,8 @@ def build_prompt(
         "Restituisci ora soltanto il JSON delle 17 sezioni con le citazioni, applicando la guida "
         "di ciascuna sezione. Sviluppa i paragrafi narrativi con i dettagli attestati. "
         "Nel laboratorio riporta una sola volta l'ultimo risultato disponibile per ciascun "
-        "esame, con la sua data. Astieniti dall'inventare terapie, decorsi o indicazioni mancanti."
+        "esame riportato, con la sua data. Usa le formule di assenza previste dalla guida "
+        "per i campi privi di dati."
     )
     return "\n".join(lines)
 
@@ -551,11 +606,28 @@ completo delle 17 sezioni, senza premesse, nei budget disponibili.
 """
 
 
-def with_read_tools(instructions: str) -> str:
+def with_read_tools(instructions: str, *, dataset: str | None = None) -> str:
     return (
         instructions.replace(
             "Non usare strumenti, non cercare informazioni e non chiedere chiarimenti.",
             "Non chiedere chiarimenti; usa soltanto gli strumenti documentali autorizzati.",
         )
         + TOOL_INSTRUCTIONS
+        + (
+            "\nNei dati MIMIC gli aggregatori riconoscono risultati hosp/labevents, "
+            "misure ed/vitalsign, ordini hosp/prescriptions, ordini espliciti di dimissione, "
+            "eventi eMAR e misure, infusioni e procedure ICU supportate. Usa l'etichetta "
+            "esatta dell'esame o del farmaco visibile nel passaggio; senza filtro il tool "
+            "elenca i gruppi riconosciuti. Gli eventi eMAR conservano event_txt: una dose "
+            "non data non è una somministrazione. Distingui inpatient_order, discharge_order "
+            "ed emar_event; non trasformare un ordine in terapia finale completa. Gli orari "
+            "senza fuso hanno ordinamento locale documentato; le unità assenti restano assenti. "
+            "coverage dichiara la copertura: inventory_empty indica nessun record riconosciuto, "
+            "no_matching_records indica filtri senza corrispondenze. Note libere, codici "
+            "amministrativi e ordini POE generici non sono eventi clinici interpretati dai tool. "
+            "Per questi passaggi torna alle fonti iniziali o usa leggi_evidenze con gli ID "
+            "pertinenti e cita i passaggi originali."
+            if dataset == MIMIC_DATASET
+            else ""
+        )
     )

@@ -12,7 +12,8 @@ from uuid import uuid4
 
 from codice_tesi.config import ModelConfig
 from codice_tesi.discharge.context import PreparedRequest
-from codice_tesi.discharge.contracts import DraftContractError
+from codice_tesi.discharge.contracts import TOOL_RESULTS_FILE, DraftContractError
+from codice_tesi.discharge.limits import ModelOutputLimitError
 from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
 from codice_tesi.discharge.provenance import (
     TRACE_SCHEMA_VERSION,
@@ -22,6 +23,7 @@ from codice_tesi.discharge.provenance import (
     recover_draft,
     render_draft,
     render_evidences,
+    repair_mimic_references,
 )
 from codice_tesi.discharge.template import MISSING_VALUE
 from codice_tesi.discharge.validation import validate_draft
@@ -57,6 +59,7 @@ class RunArtifacts:
         self.draft = self.directory / "bozza.txt"
         self.structured = self.directory / "bozza_strutturata.json"
         self.evidences = self.directory / "evidenze.md"
+        self.tool_results = self.directory / TOOL_RESULTS_FILE
         self.catalog_path = self.directory / "catalogo_evidenze.json"
         self.catalog_path.write_text(
             self.catalog.model_dump_json(indent=2) + "\n", encoding="utf-8"
@@ -107,28 +110,65 @@ class RunArtifacts:
         self, *, validation_context=nullcontext, allow_recovery=False
     ) -> Iterator[TextIO]:
         """Conserva la risposta grezza e segnala eventuali bozze recuperate."""
+        output_limit = None
         with self.partial.open("x", encoding="utf-8") as output:
-            yield output
+            try:
+                yield output
+            except ModelOutputLimitError as exc:
+                if not allow_recovery:
+                    raise
+                output_limit = exc
         with validation_context():
             try:
                 raw = self.partial.read_text(encoding="utf-8")
                 if not raw.strip():
+                    if output_limit is not None:
+                        raise output_limit
                     raise DraftContractError("Il modello non ha prodotto testo.")
                 context = self.packet.context
                 mimic = context.dataset == MIMIC_DATASET
                 recovered = False
+                repaired = False
                 try:
-                    draft = parse_draft(raw, self.catalog, self.template, dataset=context.dataset)
+                    if output_limit is not None:
+                        raise output_limit
+                    draft = parse_draft(
+                        raw,
+                        self.catalog,
+                        self.template,
+                        dataset=context.dataset,
+                        reject_uncited=allow_recovery,
+                    )
                     text = render_draft(draft, self.template)
                     validate_draft(text, self.template)
-                except (json.JSONDecodeError, DraftContractError) as exc:
+                except (json.JSONDecodeError, DraftContractError, ModelOutputLimitError) as exc:
                     if not allow_recovery:
                         raise
-                    draft = recover_draft(raw, self.catalog, self.template, dataset=context.dataset)
-                    if draft is None:
-                        raise
-                    recovered = True
                     self.report["tracciabilita"]["errore_controlli"] = str(exc)
+                    if mimic and isinstance(exc, DraftContractError):
+                        try:
+                            corrected = repair_mimic_references(raw, self.catalog)
+                            if corrected is not None:
+                                draft = parse_draft(
+                                    corrected,
+                                    self.catalog,
+                                    self.template,
+                                    dataset=context.dataset,
+                                    reject_uncited=True,
+                                )
+                                validate_draft(render_draft(draft, self.template), self.template)
+                                repaired = True
+                        except (json.JSONDecodeError, DraftContractError):
+                            pass
+                    if not repaired:
+                        draft = recover_draft(
+                            raw, self.catalog, self.template, dataset=context.dataset
+                        )
+                        recovered = True
+                self.report["tracciabilita"]["technical_first_pass"] = (
+                    "failed" if repaired or recovered else "passed"
+                )
+                self.report["tracciabilita"]["deterministic_repair"] = repaired
                 technical = "failed" if recovered else "passed"
                 if mimic:
                     self.report["sezioni_da_completare"] = [
@@ -151,20 +191,25 @@ class RunArtifacts:
                     catalog=self.catalog,
                     draft=draft,
                     facts=self.facts,
+                    raw_draft_text=raw if recovered else None,
                     validation={"technical": technical, "clinical_review": "not_performed"},
                 )
                 views = {
                     self.structured: result.model_dump_json(indent=2) + "\n",
                     self.evidences: render_evidences(result, self.template),
                     self.draft: render_draft(
-                        draft, self.template, dataset=context.dataset, recovered=recovered
+                        draft,
+                        self.template,
+                        dataset=context.dataset,
+                        recovered=recovered,
+                        raw_draft_text=result.raw_draft_text,
                     ),
                 }
                 for path, content in views.items():
                     temporary = path.with_suffix(path.suffix + ".tmp")
                     temporary.write_text(content, encoding="utf-8")
                     temporary.replace(path)
-            except (json.JSONDecodeError, DraftContractError):
+            except (json.JSONDecodeError, DraftContractError, ModelOutputLimitError):
                 self.report["tracciabilita"]["technical"] = "failed"
                 raise
             except ValueError as exc:
@@ -175,6 +220,14 @@ class RunArtifacts:
     def start(self) -> None:
         self.report["richieste_llm_avviate"] = 1
         self.finish("in_corso")
+
+    def save_tool_results(self, results: list[dict]) -> None:
+        payload = {"run_id": self.report["run_id"], "results": results}
+        temporary = self.tool_results.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        temporary.replace(self.tool_results)
 
     def finish(self, status: str, *, error: BaseException | None = None, usage=None) -> None:
         self.report["stato"] = status
@@ -196,6 +249,7 @@ class RunArtifacts:
                     self.structured,
                     self.evidences,
                     self.draft,
+                    self.tool_results,
                 )
                 if path.is_file()
             }

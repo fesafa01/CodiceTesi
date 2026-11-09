@@ -2,6 +2,8 @@
 
 from pydantic import BaseModel, ConfigDict
 
+TOOL_RESULTS_FILE = "risultati_tool.json"
+
 
 class DraftContractError(ValueError):
     """Violazione tecnica della bozza con un messaggio privo di contenuti clinici."""

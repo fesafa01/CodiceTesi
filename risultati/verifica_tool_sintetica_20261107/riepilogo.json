@@ -1,0 +1,32 @@
+{
+  "fixture_only": true,
+  "sample_files_read": 0,
+  "raw_answers_saved": false,
+  "counts_toward_180": false,
+  "full_campaign_started": false,
+  "qwen_base_rerun": false,
+  "models": [
+    {
+      "model": "qwen3.8:27b",
+      "attempts": 1,
+      "passed_checks": 1,
+      "all_four_tool_paths_confirmed": true,
+      "correct_fixture_answer_observed": true
+    },
+    {
+      "model": "gemma4:31b",
+      "attempts": 1,
+      "passed_checks": 1,
+      "all_four_tool_paths_confirmed": true,
+      "correct_fixture_answer_observed": true
+    },
+    {
+      "model": "frob/mistral-small-4:119b",
+      "attempts": 3,
+      "passed_checks": 1,
+      "all_four_tool_paths_confirmed": true,
+      "correct_fixture_answer_observed": true
+    }
+  ],
+  "note": "Conservati tutti i tentativi diagnostici; non sono una stima di affidabilità clinica. Il terzo controllo Mistral usa il lettore JSON di produzione; non è stato rimosso alcun involucro Markdown in quell’esito."
+}

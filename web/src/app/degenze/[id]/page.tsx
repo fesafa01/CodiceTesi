@@ -228,6 +228,7 @@ export default function LetterPage({
     const inventory = job.result?.facts ?? preparation.facts;
     const reviewIssues = (preparation.facts ?? inventory)?.issues ?? [];
     const recoveredDraft = job.result?.validation.technical === "failed";
+    const rawDraftText = job.result?.raw_draft_text;
     const issues = [
         ...(inventory?.issues ?? []).filter((issue) => !issue.section_id),
         ...reviewIssues.filter((issue) => issue.section_id === selected),
@@ -310,7 +311,7 @@ export default function LetterPage({
                         <button onClick={cancel} className="button secondary">Interrompi</button>
                     )}
 						<button onClick={download} className="button secondary"
-                            disabled={!sections.some((s) => sectionText(s.id, edits, job).trim())}>
+                            disabled={!rawDraftText && !sections.some((s) => sectionText(s.id, edits, job).trim())}>
 							<FiDownload /> Scarica bozza
 						</button>
 					<button
@@ -391,6 +392,12 @@ export default function LetterPage({
                 <div className="notice" role="status">
                     Bozza salvata. Controlli tecnici non superati. Verifica testo e fonti prima dell’uso.
                 </div>
+            )}
+            {rawDraftText && (
+                <details className="panel" open={!job.result?.draft.sections.some((section) => section.text.trim())}>
+                    <summary>Risposta originale del modello</summary>
+                    <p className="draft-text">{rawDraftText}</p>
+                </details>
             )}
 			{terminalError && (
 				<div className="error" role="alert">

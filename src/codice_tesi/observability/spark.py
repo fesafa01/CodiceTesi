@@ -7,6 +7,7 @@ from http.client import HTTPException
 from itertools import pairwise
 from math import isfinite
 from pathlib import Path
+from statistics import fmean
 from tempfile import NamedTemporaryFile
 from time import monotonic, sleep
 from urllib.parse import urlencode, urlsplit
@@ -14,9 +15,10 @@ from urllib.request import urlopen
 
 SPARK_MONITOR_URL = "http://spark-413e.tail9c981a.ts.net:9108"
 SPARK_HOSTS = {"spark-413e", urlsplit(SPARK_MONITOR_URL).hostname}
-HISTORY_RETRY_SECONDS = 12
+HISTORY_RETRY_SECONDS = 30
 HISTORY_POLL_SECONDS = 2
 MAX_POWER_GAP_SECONDS = 20
+POWER_FIELDS = {"plug": "plug_power_w", "gpu": "gpu_power_w"}
 MONITOR_ERRORS = (HTTPException, OSError, ValueError)
 
 
@@ -87,40 +89,58 @@ def _integrate_power(samples, source, lower, upper, gap_limit):
     return _energy_result(source=source, wh=watt_seconds / 3600, max_gap=max_gap)
 
 
-def _run_energy(history, lower, upper):
+def _energy_by_source(history, lower, upper):
     step = history.get("step")
     gap_limit = MAX_POWER_GAP_SECONDS
     if _finite_number(step) and step > 0:
         gap_limit = min(gap_limit, 2 * step)
-    result = _energy_result(reason="no_power_samples")
-    for source in ("plug", "gpu"):
-        field = f"{source}_power_w"
+    results = {}
+    for source, field in POWER_FIELDS.items():
         samples = {
             sample["t"]: sample[field]
             for sample in history["series"]
             if _finite_number(sample.get(field)) and sample[field] >= 0
         }
-        if not samples:
-            continue
-        candidate = _integrate_power(samples, source, lower, upper, gap_limit)
+        results[source] = (
+            _integrate_power(samples, source, lower, upper, gap_limit)
+            if samples
+            else _energy_result(source=source, reason="no_power_samples")
+        )
+    return results
+
+
+def _preferred_energy(results):
+    result = _energy_result(reason="no_power_samples")
+    for candidate in results.values():
         if candidate["status"] == "estimated":
             return candidate
-        if result["reason"] != "missing_end_sample":
+        if candidate["reason"] != "no_power_samples" and result["reason"] != "missing_end_sample":
             result = candidate
     return result
+
+
+def estimate_run_energy(record, history):
+    """Ricalcola la stima da uno storico già salvato."""
+    start, end = run_interval(record)
+    if history is None:
+        return _energy_result(reason="history_unavailable")
+    series = history.get("series") if isinstance(history, dict) else None
+    if not isinstance(series, list) or not _valid_timestamps(series):
+        return _energy_result(reason="invalid_sample_timestamp")
+    return _preferred_energy(_energy_by_source(history, start.timestamp(), end.timestamp()))
 
 
 def _capture_run_energy(snapshot, query, timeout, lower, upper):
     history = snapshot["history"]
     if history is None:
-        return [], _energy_result(reason="history_unavailable")
+        return [], _energy_result(reason="history_unavailable"), {}
     if not _valid_timestamps(history["series"]):
         snapshot["errors"]["history"] = "InvalidSampleTimestamp"
-        return [], _energy_result(reason="invalid_sample_timestamp")
+        return [], _energy_result(reason="invalid_sample_timestamp"), {}
 
-    result = _run_energy(history, lower, upper)
+    results = _energy_by_source(history, lower, upper)
     deadline = monotonic() + HISTORY_RETRY_SECONDS
-    while result["reason"] == "missing_end_sample":
+    while any(result["reason"] == "missing_end_sample" for result in results.values()):
         remaining = deadline - monotonic()
         if remaining <= HISTORY_POLL_SECONDS:
             break
@@ -136,9 +156,35 @@ def _capture_run_energy(snapshot, query, timeout, lower, upper):
             continue
         if candidate["series"] and _valid_timestamps(candidate["series"]):
             history = candidate
-            result = _run_energy(history, lower, upper)
+            results = _energy_by_source(history, lower, upper)
     snapshot["history"] = history
-    return history["series"], result
+    return history["series"], _preferred_energy(results), results
+
+
+def _summarize_samples(series, energy_by_source, duration):
+    values = {}
+    for sample in series:
+        for field, value in sample.items():
+            if field != "t" and _finite_number(value):
+                values.setdefault(field, []).append(value)
+    return {
+        "duration_s": duration,
+        "sample_count": len(series),
+        "fields": {
+            field: {
+                "sample_count": len(samples),
+                "min": min(samples),
+                "mean": fmean(samples),
+                "max": max(samples),
+            }
+            for field, samples in sorted(values.items())
+        },
+        "mean_power_w": {
+            source: result["wh"] * 3600 / duration
+            for source, result in energy_by_source.items()
+            if duration > 0 and result["wh"] is not None
+        },
+    }
 
 
 def capture_snapshot(base_url, hours, *, record=None, timeout=15):
@@ -154,13 +200,16 @@ def capture_snapshot(base_url, hours, *, record=None, timeout=15):
     if record is not None:
         start, end = run_interval(record)
         lower, upper = start.timestamp(), end.timestamp()
-        series, energy = _capture_run_energy(snapshot, query, timeout, lower, upper)
+        series, energy, by_source = _capture_run_energy(snapshot, query, timeout, lower, upper)
+        run_series = [sample for sample in series if lower <= sample["t"] <= upper]
         snapshot["run"] = {
             "run_id": record["run_id"],
             "started_at": start.isoformat(),
             "ended_at": end.isoformat(),
-            "series": [sample for sample in series if lower <= sample["t"] <= upper],
+            "series": run_series,
             "energy": energy,
+            "energy_by_source": by_source,
+            "summary": _summarize_samples(run_series, by_source, upper - lower),
         }
     snapshot["captured_at"] = datetime.now(UTC).isoformat()
     return snapshot

@@ -48,6 +48,17 @@ test("proxy does not expose arbitrary backend endpoints", async () => {
 	).toBe(404);
 });
 
+test("status forwards only the summary switch to the agent", async () => {
+    const id = "00000000-0000-0000-0000-000000000001";
+    const path = ["preparazioni", id, "stato"];
+    const url = `http://localhost:3000/api/preparazioni/${id}/stato?summary=true&other=value`;
+    globalThis.fetch = (async (target: string) => {
+        expect(target).toEndWith(`/api/v1/preparazioni/${id}/stato?summary=true`);
+        return Response.json({ status: "completed" });
+    }) as typeof fetch;
+    expect((await GET(new NextRequest(url), params(path))).status).toBe(200);
+});
+
 test("stop is POST-only and forwards to the selected preparation", async () => {
     let called = "";
     globalThis.fetch = (async (url: string) => {

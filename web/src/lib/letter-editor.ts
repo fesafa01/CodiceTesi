@@ -16,6 +16,11 @@ export function letterText(sections: Section[], edits: Record<string, string>, j
     const partial = job.result?.validation.technical === "failed"
         ? " — CONTROLLI TECNICI NON SUPERATI"
         : job.status !== "completed" ? " — GENERAZIONE NON COMPLETATA" : "";
-    return `BOZZA DI LETTERA DI DIMISSIONE — DA REVISIONARE${partial}\n\n`
-        + sections.map((s, i) => `${i + 1}. ${s.title}\n${sectionText(s.id, edits, job)}\n`).join("\n");
+    const title = `BOZZA DI LETTERA DI DIMISSIONE — DA REVISIONARE${partial}\n\n`;
+    const raw = job.result?.raw_draft_text;
+    const text = sections.map((section) => sectionText(section.id, edits, job));
+    const body = raw && !text.some((value) => value.trim()) ? ""
+        : sections.map((s, i) => `${i + 1}. ${s.title}\n${text[i]}\n`).join("\n");
+    const original = raw ? `${body ? "\n" : ""}RISPOSTA ORIGINALE DEL MODELLO\n\n${raw}` : "";
+    return title + body + original;
 }

@@ -31,12 +31,13 @@ from codice_tesi.application import run_application
 from codice_tesi.config import ModelConfig, Settings, default_output_dir
 from codice_tesi.discharge.client import PacketClient
 from codice_tesi.discharge.contracts import DraftContractError
-from codice_tesi.discharge.facts import extract_facts
+from codice_tesi.discharge.facts import MIMIC_FACT_EXTRACTION_VERSION, extract_facts
 from codice_tesi.discharge.limits import (
     EvidenceReadError,
     ExecutionTimeoutError,
     FinalPhaseToolCallError,
     ModelInactivityError,
+    ModelOutputLimitError,
     ToolCallValidationError,
 )
 from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
@@ -57,6 +58,7 @@ Identity = Annotated[LocalIdentity, Depends(require_identity)]
 class PrepareBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     context_id: str
+    expected_dataset_version: str | None = Field(default=None, min_length=1)
 
 
 class StartBody(BaseModel):
@@ -64,6 +66,9 @@ class StartBody(BaseModel):
     thinking: bool = True
     tools_enabled: bool = False
     timeout_seconds: int | None = Field(default=None, ge=30)
+    inactivity_timeout_seconds: int | None = Field(default=None, ge=30, le=600)
+    expected_model: str | None = Field(default=None, min_length=1)
+    expected_tool_extraction_version: str | None = Field(default=None, min_length=1)
 
 
 def write_json(path: Path, data):
@@ -156,7 +161,7 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
         write_json(path, catalog.model_dump(mode="json"))
         return catalog
 
-    async def generate(directory, packet, options):
+    async def generate(directory, packet, options, *, model=None):
         raw_text = ""
         published_text = None
         published_at = 0
@@ -190,15 +195,24 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
             write_json(directory / "state.json", state)
 
         try:
+            settings = Settings()
+            selected_model = model if model is not None else settings.model
+            model_settings = settings.for_model(selected_model)
+            if (inactivity := options.inactivity_timeout_seconds) is not None:
+                model_settings = model_settings.model_copy(
+                    update={"timeout": inactivity, "first_text_timeout": inactivity}
+                )
             artifacts = await run_application(
                 backend_url=backend,
                 output_dir=output,
                 packet=packet,
                 catalog=catalog_at(directory, packet),
+                settings=model_settings,
                 config=ModelConfig(
-                    model=Settings().model,
+                    model=selected_model,
                     thinking=options.thinking,
                     tools_enabled=options.tools_enabled,
+                    first_text_timeout=model_settings.first_text_timeout,
                     total_timeout=options.timeout_seconds,
                 ),
                 on_progress=lambda progress: update(**progress),
@@ -245,6 +259,13 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
                 phase="scaduta",
                 failure_code="total_timeout",
                 detail="Durata massima raggiunta. Risposta parziale conservata negli artefatti.",
+            )
+        except ModelOutputLimitError:
+            update(
+                status="failed",
+                phase="risposta_non_valida",
+                failure_code="model_output_limit",
+                detail="Limite di token raggiunto prima di ricevere il testo della bozza.",
             )
         except FinalPhaseToolCallError:
             update(
@@ -362,6 +383,11 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
             )
         except ValueError:
             raise HTTPException(502, "Impossibile recuperare la degenza dal backend.") from None
+        if (
+            body.expected_dataset_version is not None
+            and packet.context.dataset_version != body.expected_dataset_version
+        ):
+            raise HTTPException(412, "La versione del campione è cambiata.")
         session_id = str(uuid4())
         directory = sessions / session_id
         directory.mkdir(parents=True)
@@ -408,21 +434,34 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
     async def start(session_id: UUID, identity: Identity, body: StartBody | None = None):
         directory, packet = session(session_id, identity)
         async with lock:
+            options = body or StartBody()
+            if (
+                options.expected_tool_extraction_version is not None
+                and options.expected_tool_extraction_version != MIMIC_FACT_EXTRACTION_VERSION
+            ):
+                raise HTTPException(412, "La versione dei tool non corrisponde a quella attesa.")
             state = state_at(directory)
             if state["status"] in {"running", "cancelling", "completed", "failed", "interrupted"}:
                 return state
             if tasks:
                 raise HTTPException(409, "Una generazione è già in corso. Riprovare al termine.")
-            options = body or StartBody()
+            model = Settings().model if options.expected_model else None
+            if options.expected_model and model != options.expected_model:
+                raise HTTPException(412, "Il modello configurato non corrisponde a quello atteso.")
+            recorded_options = options.model_dump(
+                exclude={"expected_model", "expected_tool_extraction_version"}
+            )
+            if options.inactivity_timeout_seconds is None:
+                recorded_options.pop("inactivity_timeout_seconds")
             state.update(
                 status="running",
                 phase="avvio",
                 detail="Generazione in corso…",
                 started_at=datetime.now(UTC).isoformat(),
-                options=options.model_dump(),
+                options=recorded_options,
             )
             write_json(directory / "state.json", state)
-            task = asyncio.create_task(generate(directory, packet, options))
+            task = asyncio.create_task(generate(directory, packet, options, model=model))
             tasks[str(session_id)] = task
             task.add_done_callback(lambda _: tasks.pop(str(session_id), None))
             return state
@@ -449,8 +488,12 @@ def create_app(*, output_dir: Path | None = None, backend_url: str | None = None
         return state
 
     @app.get("/api/v1/preparazioni/{session_id}/stato")
-    async def status(session_id: UUID, identity: Identity):
+    async def status(session_id: UUID, identity: Identity, summary: bool = False):
         directory, packet = session(session_id, identity)
+        if summary:
+            state = state_at(directory)
+            fields = ("id", "status", "run_id", "failure_code")
+            return {key: state[key] for key in fields if key in state}
         return job_at(directory, packet)
 
     @app.get("/api/v1/preparazioni/{session_id}/stream")

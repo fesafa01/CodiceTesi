@@ -9,11 +9,18 @@ from openai import AsyncOpenAI
 from pydantic_ai.exceptions import ModelAPIError
 
 from codice_tesi import api, application
-from codice_tesi.config import DEEPSEEK_MODEL, GEMMA_MODEL, QWEN_MODEL, ModelConfig, Settings
+from codice_tesi.config import (
+    DEEPSEEK_MODEL,
+    GEMMA_MODEL,
+    MISTRAL_MODEL,
+    QWEN_MODEL,
+    ModelConfig,
+    Settings,
+)
 from codice_tesi.discharge.config import ContextConfig
 from codice_tesi.discharge.context import prepare_request
 from codice_tesi.discharge.generator import LLMDraftGenerator
-from codice_tesi.discharge.limits import ModelInactivityError
+from codice_tesi.discharge.limits import ModelInactivityError, ModelOutputLimitError
 
 
 def sse(text, finish=None):
@@ -28,7 +35,7 @@ def sse(text, finish=None):
 
 
 @pytest.mark.parametrize("thinking", [False, True])
-@pytest.mark.parametrize("model", [DEEPSEEK_MODEL, QWEN_MODEL, GEMMA_MODEL])
+@pytest.mark.parametrize("model", [DEEPSEEK_MODEL, QWEN_MODEL, GEMMA_MODEL, MISTRAL_MODEL])
 def test_single_http_call_streams_before_completion_and_flushes_same_file(
     packet_factory, tmp_path, monkeypatch, thinking, model, letter_factory, response_factory
 ):
@@ -63,9 +70,10 @@ def test_single_http_call_streams_before_completion_and_flushes_same_file(
             assert body["stream"] is True and not body.get("tools")
             assert body.get("tool_choice") in (None, "none")
             assert body["model"] == model and body["max_tokens"] == 8192
-            if model in {QWEN_MODEL, GEMMA_MODEL}:
+            if model in {QWEN_MODEL, GEMMA_MODEL, MISTRAL_MODEL}:
                 assert body["response_format"] == {"type": "json_object"}
-                assert body["reasoning_effort"] == ("low" if thinking else "none")
+                effort = "high" if model == MISTRAL_MODEL else "low"
+                assert body["reasoning_effort"] == (effort if thinking else "none")
             else:
                 assert "response_format" not in body
                 assert body["top_k"] == 20
@@ -383,7 +391,7 @@ def test_truncated_response_keeps_partial_and_does_not_retry(
         directory = run()
         assert (directory / "bozza.txt").read_text() == letter
     else:
-        with pytest.raises(ValueError, match="parziale"):
+        with pytest.raises(ModelOutputLimitError):
             run()
         directory = next(tmp_path.rglob("risposta.parziale.json")).parent
         assert (directory / "risposta.parziale.json").read_text() == "Testo"

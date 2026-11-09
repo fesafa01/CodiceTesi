@@ -61,11 +61,12 @@ async function proxy(request: NextRequest, path: string[]) {
 			{ detail: "Risorsa non disponibile." },
 			{ status: 404, headers },
 		);
+	const statusSummary = path[2] === "stato" && request.nextUrl.searchParams.get("summary") === "true";
 	const target = isList
 		? `${backend}/api/v1/compilazione/contesti`
 		: isReference
 		? `${reference}/api/v1/revisione/${route}${request.nextUrl.search}`
-		: `${agent}/api/v1/${path.map(encodeURIComponent).join("/")}`;
+		: `${agent}/api/v1/${path.map(encodeURIComponent).join("/")}${statusSummary ? "?summary=true" : ""}`;
 	const isStream = request.method === "GET" && path[2] === "stream";
 	const isGenerationStart = request.method === "POST" && path[2] === "genera";
 	try {

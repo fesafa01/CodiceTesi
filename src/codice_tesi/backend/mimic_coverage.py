@@ -15,6 +15,7 @@ from codice_tesi.backend.mimic import (
     load_poe,
     microbiology_available,
     mixed_eligibility,
+    result_comment,
     rows,
 )
 
@@ -96,7 +97,7 @@ def clinical_coverage(hosp, notes, ed, ed_stays, admissions, *, extended=False):
             "labevents",
             admissions,
             lambda row, admission: (
-                (row["value"] or row["valuenum"])
+                (row["value"] or row["valuenum"] or result_comment(row))
                 and during(row, admission, "charttime", "storetime")
             ),
         )

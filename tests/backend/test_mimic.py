@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import gzip
+import hashlib
 import json
 from collections import defaultdict
 
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from codice_tesi.access import LocalIdentity
 from codice_tesi.backend.app import create_app
+from codice_tesi.backend.cli import select_mimic_within_budget
 from codice_tesi.backend.database import Database
 from codice_tesi.backend.mimic import (
     add_icu,
@@ -245,6 +247,115 @@ def test_rich_pilot_import_labels_complete_case_and_keeps_reference_separate(
     assert references[context.id][0]["note_id"] == "reference"
     assert any("Esame A: 22 unità" in source.text for source in sources)
     assert all("Testo riservato" not in source.text for source in sources)
+
+
+def test_hosp_ed_import_excludes_icu_and_requires_discharge_med_and_poe(tmp_path, mimic_subset):
+    # Replicate the synthetic episode so each pathway has a distinct patient.
+    for path in tmp_path.glob("*.csv.gz"):
+        with gzip.open(path, "rt", newline="") as file:
+            header, *records = csv.reader(file)
+        if not {"subject_id", "hadm_id"} <= set(header) and path.name not in (
+            "patients.csv.gz",
+            "poe_detail.csv.gz",
+            "emar_detail.csv.gz",
+        ):
+            continue
+        subject = header.index("subject_id")
+        copies = []
+        for patient, admission in (("20", "200"), ("30", "300"), ("40", "400")):
+            if patient == "40" and path.name in ("prescriptions.csv.gz", "poe_detail.csv.gz"):
+                continue
+            for row in records:
+                if row[subject] != "10":
+                    continue
+                copy = row.copy()
+                copy[subject] = patient
+                if "hadm_id" in header:
+                    index = header.index("hadm_id")
+                    if row[index] != "100":
+                        continue
+                    copy[index] = admission
+                copies.append(copy)
+        with gzip.open(path, "wt", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(header)
+            writer.writerows([*records, *copies])
+
+    def table(name, header, records=()):
+        with gzip.open(tmp_path / f"{name}.csv.gz", "wt", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(header.split())
+            writer.writerows(records)
+
+    start, end = "2141-01-01 12:00:00", "2141-01-02 12:00:00"
+    episodes = (("10", "100"), ("20", "200"), ("30", "300"), ("40", "400"))
+    table(
+        "services",
+        "subject_id hadm_id transfertime prev_service curr_service",
+        [(subject, hadm, start, "", "MED") for subject, hadm in episodes],
+    )
+    table(
+        "diagnoses_icd",
+        "subject_id hadm_id icd_version icd_code seq_num",
+        [(subject, hadm, "10", "Z00", "1") for subject, hadm in episodes],
+    )
+    table(
+        "edstays",
+        "subject_id hadm_id stay_id intime outtime arrival_transport disposition",
+        [("20", "200", "ed-a", start, end, "WALK IN", "ADMITTED")],
+    )
+    table(
+        "transfers",
+        "subject_id hadm_id transfer_id eventtype careunit intime",
+        [("30", "300", "1", "transfer", "Coronary Care Unit (CCU)", start)],
+    )
+    table("triage", "subject_id stay_id chiefcomplaint")
+    for name in ("vitalsign", "diagnosis", "medrecon", "pyxis"):
+        table(name, "subject_id stay_id")
+
+    options = dict(limit=2, seed=42, ed=tmp_path, hosp_ed_only=True, rich_pilot=True)
+    contexts, sources, references = load_mimic(tmp_path, tmp_path, **options)
+    assert [context.display_name for context in contexts] == ["Caso Hosp 1", "Caso Hosp e ED 1"]
+    assert set(references) == {"mimic-100", "mimic-200"}
+    assert not any(source.origin.startswith("icu/") for source in sources)
+    assert all("Testo riservato" not in source.text for source in sources)
+
+    oversized = contexts[0].model_copy(update={"id": "mimic-999"})
+    large_text = "Dato sintetico.\n" * 8000
+    extra = sources[0].model_copy(
+        update={
+            "id": "fixture-large",
+            "context_id": oversized.id,
+            "text": large_text,
+            "sha256": hashlib.sha256(large_text.encode()).hexdigest(),
+        }
+    )
+    filtered, evidence, targets = select_mimic_within_budget(
+        iter(
+            [
+                ([oversized], [extra], {oversized.id: references["mimic-100"]}),
+                (contexts, sources, references),
+            ]
+        ),
+        limit=2,
+        budget=80000,
+    )
+    assert [context.id for context in filtered] == ["mimic-100", "mimic-200"]
+    assert set(targets) == set(references)
+    assert {source.version for source in evidence} == {filtered[0].dataset_version}
+    batches = load_mimic(
+        tmp_path, tmp_path, **{**options, "rich_pilot": False}, candidate_batches=True
+    )
+    compact, _, _ = select_mimic_within_budget(batches, limit=2, budget=80000)
+    assert {context.id for context in compact} == {"mimic-100", "mimic-200"}
+    with pytest.raises(ValueError, match="Campione insufficiente"):
+        select_mimic_within_budget([(contexts, sources, references)], limit=2, budget=1)
+
+    with gzip.open(tmp_path / "poe.csv.gz", "rt", newline="") as file:
+        header, *records = csv.reader(file)
+    table("poe", " ".join(header), [row for row in records if row[0] not in {"10", "40"}])
+    with pytest.raises(ValueError, match="Discharge Med utilizzabile e ordini POE"):
+        load_mimic(tmp_path, tmp_path, **options)
 
 
 def test_expanded_hosp_separates_timed_sources_and_discharge_orders(tmp_path, mimic_subset):

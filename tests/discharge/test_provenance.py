@@ -16,8 +16,29 @@ from codice_tesi.discharge.provenance import (
     parse_draft,
     render_draft,
     render_evidences,
+    repair_mimic_references,
 )
 from codice_tesi.discharge.template import MISSING_VALUE
+
+
+def test_mimic_repair_groups_known_evidences_and_preserves_the_section_text(packet_factory):
+    catalog = build_catalog(packet_factory("prima", "seconda"))
+    first, second = catalog.evidences[:2]
+    citation = {"source_id": first.source_id, "evidence_ids": [first.id, second.id]}
+    payload = {
+        "sections": [
+            {"section_id": "decorso", "text": "Testo di prova.", "sources": [citation, citation]},
+            {"section_id": "istologico_in_attesa", "text": "No", "sources": []},
+        ]
+    }
+    sections = json.loads(repair_mimic_references(json.dumps(payload), catalog))["sections"]
+    assert sections[0]["text"] == "Testo di prova."
+    assert sections[0]["sources"] == [
+        {"source_id": item.source_id, "evidence_ids": [item.id]} for item in (first, second)
+    ]
+    assert sections[1]["text"] == MISSING_VALUE
+    citation["evidence_ids"].append("ignota")
+    assert repair_mimic_references(json.dumps(payload), catalog) is None
 
 
 def test_catalog_preserves_original_unicode_and_makes_verified_identity_citable(packet_factory):

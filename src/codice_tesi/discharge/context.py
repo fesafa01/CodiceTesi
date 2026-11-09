@@ -8,6 +8,7 @@ from codice_tesi.discharge.facts import FactInventory, extract_facts
 from codice_tesi.discharge.models import MIMIC_DATASET, CompositionPacket
 from codice_tesi.discharge.prompts import (
     MIMIC_PROMPT_VERSION,
+    MIMIC_TOOL_PROMPT_VERSION,
     PROMPT_VERSION,
     build_instructions,
     build_prompt,
@@ -47,9 +48,13 @@ def prepare_request(
     model_config = model_config or ModelConfig()
     dataset = packet.context.dataset
     facts = extract_facts(catalog, dataset=dataset)
-    instructions = build_instructions(packet.template, dataset=dataset)
+    instructions = build_instructions(
+        packet.template,
+        dataset=dataset,
+        has_icu_sources=any((source.origin or "").startswith("icu/") for source in catalog.sources),
+    )
     if model_config.tools_enabled:
-        instructions = with_read_tools(instructions)
+        instructions = with_read_tools(instructions, dataset=dataset)
     prompt = build_prompt(packet, catalog, facts)
     token_estimate = estimate_input_tokens(instructions, prompt, model_config)
     estimate = token_estimate.tokens
@@ -66,7 +71,13 @@ def prepare_request(
     return PreparedRequest(
         instructions=instructions,
         prompt=prompt,
-        prompt_version=MIMIC_PROMPT_VERSION if dataset == MIMIC_DATASET else PROMPT_VERSION,
+        prompt_version=(
+            MIMIC_TOOL_PROMPT_VERSION
+            if dataset == MIMIC_DATASET and model_config.tools_enabled
+            else MIMIC_PROMPT_VERSION
+            if dataset == MIMIC_DATASET
+            else PROMPT_VERSION
+        ),
         catalog=catalog,
         input_tokens_estimate=estimate,
         input_estimate_method=token_estimate.method,

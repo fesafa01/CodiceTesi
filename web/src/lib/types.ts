@@ -58,6 +58,7 @@ export type Result = {
 	binding: { context_id: string; run_id: string };
 	catalog: Catalog;
 	draft: { sections: DraftSection[] };
+	raw_draft_text?: string;
 	validation: { technical: string; clinical_review: string };
     facts?: FactInventory;
 };

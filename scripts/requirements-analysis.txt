@@ -1,0 +1,3 @@
+# Versioni utilizzate per le figure quantitative delle campagne Spark.
+matplotlib==3.10.3
+numpy==2.3.0

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from codice_tesi import application
 from codice_tesi.access import LocalIdentity
-from codice_tesi.config import QWEN_MODEL
+from codice_tesi.config import GEMMA_MODEL, MISTRAL_MODEL, QWEN_MODEL
 from codice_tesi.web_api.app import create_app
 
 
@@ -112,6 +112,11 @@ def test_generation_uses_preloaded_packet_and_publishes_validated_result(
     assert result["result"]["binding"]["context_id"] == packet.context.id
     assert result["result"]["validation"]["technical"] == "passed"
     assert result["result"]["catalog"]["sources"][0]["text"] == packet.sources[0].text
+    assert client.get(path + "/stato?summary=true").json() == {
+        "id": result["id"],
+        "status": "completed",
+        "run_id": result["run_id"],
+    }
     assert len(calls) == len(streams) == 1
     expected = options or {"thinking": True, "tools_enabled": False}
     assert configs[0].model == QWEN_MODEL
@@ -123,7 +128,18 @@ def test_generation_uses_preloaded_packet_and_publishes_validated_result(
     assert "Testo di fixture" not in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("variant", ["invalid_citation", "truncated", "no_sections"])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "invalid_citation",
+        "truncated",
+        "section_map",
+        "section_array",
+        "no_sections",
+        "plain_text",
+        "empty",
+    ],
+)
 def test_web_saves_recoverable_text_from_invalid_drafts(
     web_client, monkeypatch, letter_factory, response_factory, variant
 ):
@@ -138,10 +154,18 @@ def test_web_saves_recoverable_text_from_invalid_drafts(
 
         async def stream(self, request):
             response = response_factory(letter_factory())
-            if variant == "no_sections":
+            if variant == "empty":
+                yield "  "
+            elif variant == "no_sections":
                 yield '{"sections":'
+            elif variant == "plain_text":
+                yield "Bozza sintetica in prosa."
             elif variant == "truncated":
                 yield response[: response.index("Testo di fixture.") + len("Testo di fixture.")]
+            elif variant == "section_map":
+                yield json.dumps({"sections": {"identificazione": "Testo di fixture."}})
+            elif variant == "section_array":
+                yield json.dumps([{"id": "identificazione", "content": "Testo di fixture."}])
             else:
                 yield response.replace("evidenza-0001", "inventata", 1)
 
@@ -149,14 +173,19 @@ def test_web_saves_recoverable_text_from_invalid_drafts(
     path = prepare(client)
     client.post(path + "/genera")
     result = wait_result(client, path)
-    if variant == "no_sections":
+    if variant == "empty":
         assert result["status"] == "failed" and "result" not in result
-        assert result["failure_code"] == "invalid_draft_json"
+        assert result["failure_code"] == "invalid_draft_contract"
         return
     assert result["status"] == "completed"
     assert result["result"]["validation"]["technical"] == "failed"
     sections = result["result"]["draft"]["sections"]
-    assert sections[0]["text"] == "Testo di fixture." and sections[0]["sources"] == []
+    if variant in {"no_sections", "plain_text"}:
+        assert all(not section["text"] and not section["sources"] for section in sections)
+        expected = '{"sections":' if variant == "no_sections" else "Bozza sintetica in prosa."
+        assert result["result"]["raw_draft_text"] == expected
+    else:
+        assert sections[0]["text"] == "Testo di fixture." and sections[0]["sources"] == []
     if variant == "invalid_citation":
         assert any(section["sources"] for section in sections[1:])
     else:
@@ -290,22 +319,100 @@ def test_invalid_duration_does_not_start_a_job(web_client):
     assert client.get(path + "/stato").json()["status"] == "prepared"
 
 
-def test_model_inactivity_is_reported_separately_from_generic_failure(web_client, monkeypatch):
+def test_expected_dataset_mismatch_prevents_preparation(web_client):
+    client, _, packet = web_client
+    response = client.post(
+        "/api/v1/preparazioni",
+        json={"context_id": packet.context.id, "expected_dataset_version": "another-version"},
+    )
+    assert response.status_code == 412
+    assert "id" not in response.json()
+
+
+def test_expected_model_mismatch_leaves_preparation_ready(web_client):
+    client, _, _ = web_client
+    path = prepare(client)
+    response = client.post(path + "/genera", json={"expected_model": "another-model"})
+    assert response.status_code == 412
+    assert client.get(path + "/stato?summary=true").json()["status"] == "prepared"
+
+
+def test_tool_version_mismatch_does_not_start_generation(web_client, monkeypatch):
+    client, _, _ = web_client
+    monkeypatch.setattr(
+        "codice_tesi.web_api.app.run_application",
+        lambda **_: pytest.fail("Non deve partire il modello"),
+    )
+    path = prepare(client)
+    response = client.post(
+        path + "/genera",
+        json={
+            "thinking": True,
+            "tools_enabled": True,
+            "expected_tool_extraction_version": "obsolete-synthetic-version",
+        },
+    )
+    assert response.status_code == 412
+    assert client.get(path + "/stato?summary=true").json()["status"] == "prepared"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize(
+    ("model", "first_text", "read"),
+    [(QWEN_MODEL, 240, 300), (GEMMA_MODEL, 600, 600), (MISTRAL_MODEL, 600, 600)],
+)
+def test_model_inactivity_uses_the_model_timeout(
+    web_client, monkeypatch, tmp_path, model, first_text, read, enabled
+):
     from codice_tesi.discharge.limits import ModelInactivityError
 
     client, _, _ = web_client
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LLM_MODEL", model)
+    monkeypatch.setenv("LLM_TIMEOUT", "300")
+    monkeypatch.delenv("LLM_FIRST_TEXT_TIMEOUT", raising=False)
+    monkeypatch.delenv("LLM_GEMMA_MISTRAL_TIMEOUT", raising=False)
 
     async def run(**kwargs):
-        raise ModelInactivityError(240)
+        assert kwargs["config"].first_text_timeout == first_text
+        assert kwargs["config"].total_timeout is None
+        assert kwargs["settings"].timeout == read
+        raise ModelInactivityError(first_text)
 
     monkeypatch.setattr("codice_tesi.web_api.app.run_application", run)
     path = prepare(client)
-    client.post(path + "/genera")
+    client.post(
+        path + "/genera",
+        json={"expected_model": model, "thinking": enabled, "tools_enabled": enabled},
+    )
     result = wait_result(client, path)
     assert result["status"] == "failed"
     assert result["failure_code"] == "model_inactivity_timeout"
-    assert "240 secondi" in result["detail"] and "in coda" in result["detail"]
+    assert f"{first_text} secondi" in result["detail"] and "in coda" in result["detail"]
     assert "generazioni già attive" in result["detail"] and "result" not in result
+
+
+def test_campaign_sets_both_inactivity_timeouts_for_any_configured_model(web_client, monkeypatch):
+    client, _, _ = web_client
+    monkeypatch.setenv("LLM_MODEL", "fixture-custom-model")
+    monkeypatch.setenv("LLM_TIMEOUT", "300")
+    monkeypatch.setenv("LLM_FIRST_TEXT_TIMEOUT", "240")
+
+    async def run(**kwargs):
+        assert kwargs["config"].first_text_timeout == kwargs["settings"].timeout == 600
+        assert kwargs["config"].total_timeout is None
+        raise ModelInactivityError(600)
+
+    from codice_tesi.discharge.limits import ModelInactivityError
+
+    monkeypatch.setattr("codice_tesi.web_api.app.run_application", run)
+    path = prepare(client)
+    response = client.post(
+        path + "/genera",
+        json={"expected_model": "fixture-custom-model", "inactivity_timeout_seconds": 600},
+    )
+    assert response.status_code == 202
+    assert wait_result(client, path)["failure_code"] == "model_inactivity_timeout"
 
 
 def test_manual_sections_are_saved_with_conflict_detection_and_survive_restart(
@@ -523,7 +630,9 @@ def test_agent_api_import_does_not_load_sql_backend_or_driver():
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("variant", ["no_histology", "incomplete", "histology", "recovered"])
+@pytest.mark.parametrize(
+    "variant", ["no_histology", "incomplete", "histology", "recovered", "raw_only", "output_limit"]
+)
 def test_web_generation_archives_provider_usage_and_cited_sources(
     tmp_path, monkeypatch, packet_factory, letter_factory, response_factory, variant
 ):
@@ -534,13 +643,12 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
 
     from codice_tesi import api
     from codice_tesi.discharge.models import MIMIC_DATASET
-    from codice_tesi.discharge.template import MISSING_VALUE
     from codice_tesi.observability import spark_archive
 
     token = "x" * 43
     root = tmp_path / "output"
     run_output = root / "dimissioni-mimic"
-    archive = tmp_path / "TEST-SPARK"
+    archive = tmp_path / "TEST-SPARK-QWEN"
     monkeypatch.setenv("APP_MIMIC_TOKEN", token)
     monkeypatch.setenv("APP_MIMIC_CONTEXTS", "mimic-1")
     monkeypatch.setenv("TESI_OUTPUT_DIR", str(root))
@@ -553,7 +661,11 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
     packet = packet.model_copy(
         update={
             "context": packet.context.model_copy(
-                update={"id": "mimic-1", "dataset": MIMIC_DATASET}
+                update={
+                    "id": "mimic-1",
+                    "dataset": MIMIC_DATASET,
+                    "display_name": "Caso ED e ICU 1",
+                }
             ),
             "sources": tuple(
                 s.model_copy(update={"context_id": "mimic-1"}) for s in packet.sources
@@ -567,14 +679,17 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
 
     incomplete = variant == "incomplete"
     histology = variant == "histology"
-    recovered = variant == "recovered"
+    raw_only = variant in {"raw_only", "output_limit"}
+    recovered = variant == "recovered" or incomplete or raw_only
     thinking = incomplete or histology
     letter = letter_factory(answer="Sì", details="Dettagli.") if histology else letter_factory()
     draft = response_factory(letter)
-    if recovered:
+    if variant == "recovered":
         response = json.loads(draft)
         response["sections"][2].update(text="Testo della terza sezione.", sources="formato errato")
         draft = json.dumps(response)
+    if raw_only:
+        draft = "Risposta sintetica con il testo della lettera fuori schema."
     if incomplete:
         response = json.loads(response_factory(letter_factory(answer="Sì", details="Dettagli.")))
         response["sections"] = [
@@ -595,8 +710,9 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
         assert body["reasoning_effort"] == ("low" if thinking else "none")
         assert not body.get("tools")
         assert "leggi_evidenze" not in json.dumps(body["messages"])
+        finish = "length" if variant == "output_limit" else "stop"
         events = [
-            {"choices": [{"index": 0, "delta": {"content": draft}, "finish_reason": "stop"}]},
+            {"choices": [{"index": 0, "delta": {"content": draft}, "finish_reason": finish}]},
             {
                 "choices": [],
                 "usage": {"prompt_tokens": 42, "completion_tokens": 12, "total_tokens": 54},
@@ -644,7 +760,8 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
         assert len(preparation["visible_section_ids"]) == 14
         assert (
             client.post(
-                path + "/genera", json={"thinking": thinking, "tools_enabled": False}
+                path + "/genera",
+                json={"thinking": thinking, "tools_enabled": False, "expected_model": QWEN_MODEL},
             ).status_code
             == 202
         )
@@ -665,20 +782,22 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
     assert {"terapia_dimissione", "programma_followup"} <= set(visible)
     if recovered:
         assert state["result"]["validation"]["technical"] == "failed"
+        assert state["result"]["raw_draft_text"] == draft
+    if variant == "recovered":
         assert sections[2]["text"] == "Testo della terza sezione." and sections[2]["sources"] == []
     issues = state["result"]["facts"]["issues"]
     assert {"terapia_dimissione", "programma_followup"} <= {issue["section_id"] for issue in issues}
     assert ("istologico_in_attesa" in visible) is (incomplete or histology)
     assert ("informazioni_istologico" in visible) is histology
     if incomplete:
-        missing = ["decorso", "terapia_dimissione", "informazioni_istologico"]
-        for key in missing:
-            text = "" if key == "terapia_dimissione" else MISSING_VALUE
-            assert by_id[key] == {"section_id": key, "text": text, "sources": []}
+        assert by_id["decorso"]["text"] == "Conclusione senza fonte."
+        assert by_id["decorso"]["sources"] == []
+        assert by_id["terapia_dimissione"]["text"] == ""
+        assert by_id["informazioni_istologico"]["text"] == ""
         assert by_id["programma_followup"]["text"] == ""
         assert by_id["istologico_in_attesa"]["text"] == "Sì"
         report = json.loads((artifacts / "esito.json").read_text())
-        assert report["sezioni_da_completare"] == missing
+        assert "terapia_dimissione" in report["sezioni_da_completare"]
         assert (artifacts / "risposta.parziale.json").read_text() == draft
 
     class EndScan(Exception):
@@ -698,11 +817,13 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
     with pytest.raises(EndScan):
         spark_archive.run_worker(archive, root, base_url="http://reference", token=token)
 
-    case = archive / "TEST-CASO-MIMIC-1"
+    mode = "REASONING" if thinking else "BASE"
+    case = archive / f"TEST-MIMIC-CASO-ED-E-ICU-1-{mode}"
     files = {"bozza.txt", "evidenze.md"}
     sheet = json.loads((case / "scheda.json").read_text())
     assert set(sheet["artifact_files"]) == files
     assert sheet["run_id"] == state["run_id"]
+    assert sheet["display_name"] == packet.context.display_name
     assert sheet["model"] == QWEN_MODEL and sheet["response_model"] == "fixture-model-revision"
     assert sheet["reasoning_enabled"] is thinking and sheet["tools_enabled"] is False
     assert sheet["reasoning_effort"] == ("low" if thinking else None)
@@ -720,17 +841,23 @@ def test_web_generation_archives_provider_usage_and_cited_sources(
     evidence = (case / "evidenze.md").read_text()
     archived_draft = (case / "bozza.txt").read_text()
     assert ("CONTROLLI TECNICI NON SUPERATI" in archived_draft) is recovered
+    if recovered:
+        assert archived_draft.endswith(draft)
     for content in (evidence, archived_draft):
         assert "Specializzando e altro medico" not in content
         assert ("In attesa di esame istologico" in content) is (incomplete or histology)
         assert ("Informazioni sull’istologico" in content) is histology
     assert "## 1. " + packet.template.sections[0].title in evidence
-    assert packet.sources[0].text in evidence
-    assert state["result"]["draft"]["sections"][0]["sources"][0]["evidence_ids"][0] in evidence
+    if not raw_only:
+        assert packet.sources[0].text in evidence
+        first_citation = state["result"]["draft"]["sections"][0]["sources"][0]
+        assert first_citation["evidence_ids"][0] in evidence
     metrics = json.loads((case / "metriche.json").read_text())
     assert metrics["draft_technical_validation"] == sheet["draft_technical_validation"]
     assert metrics["token_e_stream"] == record["llm"]
     assert metrics["token_e_stream"]["input_tokens"] == 42
     assert metrics["token_e_stream"]["output_tokens"] == 12
+    if variant == "output_limit":
+        assert metrics["token_e_stream"]["finish_reason"] == "length"
     assert metrics["token_e_stream"]["usage_complete"] is True
     assert metrics["telemetry"]["enabled"] is False

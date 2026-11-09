@@ -1,6 +1,6 @@
 """Fatti documentali estratti dai record testuali strutturati, senza inferenza clinica.
 
-Legge la rappresentazione già preparata dall'adattatore Synthea, anche nei
+Legge la rappresentazione preparata dagli adattatori Synthea e MIMIC, anche nei
 pacchetti esistenti. Le note libere non vengono interpretate automaticamente.
 """
 
@@ -21,6 +21,8 @@ from codice_tesi.discharge.models import (
 
 if TYPE_CHECKING:
     from codice_tesi.discharge.provenance import EvidenceCatalog
+
+MIMIC_FACT_EXTRACTION_VERSION = "mimic-record-v1"
 
 FOLLOWUP_ACTION = re.compile(
     r"\b(?:outpatient (?:follow[ -]?up|review|visit)|"
@@ -225,6 +227,16 @@ def _followup_issues(catalog: "EvidenceCatalog") -> list[DocumentaryIssue]:
 
 
 def extract_facts(catalog: "EvidenceCatalog", *, dataset: str | None = None) -> FactInventory:
+    if dataset == MIMIC_DATASET:
+        from codice_tesi.discharge.mimic_facts import extract_mimic_facts
+
+        # I rilievi già esposti nel prompt Base restano invariati. I nuovi fatti
+        # alimentano i tool, senza aggiungere inferenze o nuovi rilievi al prompt.
+        return FactInventory(
+            extraction_version=MIMIC_FACT_EXTRACTION_VERSION,
+            facts=extract_mimic_facts(catalog),
+            issues=tuple(_discharge_therapy_issues(catalog) + _followup_issues(catalog)),
+        )
     sources = {source.id: source for source in catalog.sources}
     facts, issues = [], []
     observations = {}
@@ -329,7 +341,4 @@ def extract_facts(catalog: "EvidenceCatalog", *, dataset: str | None = None) -> 
                     )
                 )
             observations[key] = fact
-    if dataset == MIMIC_DATASET:
-        issues.extend(_discharge_therapy_issues(catalog))
-        issues.extend(_followup_issues(catalog))
     return FactInventory(facts=tuple(facts), issues=tuple(issues))

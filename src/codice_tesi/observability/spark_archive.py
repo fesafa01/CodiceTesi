@@ -8,52 +8,102 @@ from pathlib import Path
 from shutil import copyfile
 from tempfile import TemporaryDirectory
 from time import sleep
+from unicodedata import normalize
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from codice_tesi.discharge.contracts import TOOL_RESULTS_FILE
 from codice_tesi.observability.spark import save_snapshot
 
-PREFIX = "TEST-CASO-MIMIC-"
+LEGACY_PREFIX = "TEST-CASO-MIMIC-"
+CASE_PREFIX = "TEST-MIMIC-"
 SHEET = "scheda.json"
 RESET_MARKER = ".archive-reset"
 ARCHIVE_VERSION = 2
+TERMINAL_STATUSES = {"completed", "failed", "interrupted"}
 logger = logging.getLogger(__name__)
-
-
-class ReferenceUnavailable(Exception):
-    """Il servizio di revisione non ha un originale per la versione del caso."""
 
 
 def read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def archive_run(
-    destination: Path, record_path: Path, record: dict, *, base_url: str, token: str
-) -> dict | None:
+def _archivable_run(record):
     run = record.get("test_spark") or {}
-    if (
-        run.get("archive_version") != ARCHIVE_VERSION
-        or record.get("status") != "completed"
-        or not run.get("artifact_directory")
-    ):
+    if run.get("archive_version") == ARCHIVE_VERSION and record.get("status") in TERMINAL_STATUSES:
+        return run
+    return None
+
+
+def _display_name(record_path, run):
+    if "display_name" in run or not run.get("artifact_directory"):
+        return run.get("display_name")
+    # I run precedenti alla modifica hanno già il nome nel rapporto di esecuzione.
+    report = record_path.parents[1] / run["artifact_directory"] / "esito.json"
+    try:
+        return read_json(report).get("contesto", {}).get("display_name")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _archive_destination(root, record_path, record, run, number):
+    name = _display_name(record_path, run)
+    if isinstance(name, str):
+        run["display_name"] = name
+        normalized = normalize("NFKD", name).encode("ascii", "ignore").decode().upper()
+        slug = re.sub(r"[^A-Z0-9]+", "-", normalized).strip("-")[:80].rstrip("-")
+        if slug:
+            config = record["model_config"]
+            modes = {
+                (False, False): "BASE",
+                (True, False): "REASONING",
+                (False, True): "TOOL",
+                (True, True): "REASONING-TOOL",
+            }
+            mode = modes[config["thinking"], config["tools_enabled"]]
+            stem = f"{CASE_PREFIX}{slug}-{mode}"
+            destination = root / stem
+            repetition = 2
+            while destination.exists() or destination.is_symlink():
+                destination = root / f"{stem}-R{repetition}"
+                repetition += 1
+            return destination
+    return root / f"{LEGACY_PREFIX}{number + 1}"
+
+
+def archive_run(destination: Path, record_path: Path, record: dict) -> dict | None:
+    run = _archivable_run(record)
+    if run is None:
         return None
     output = record_path.parents[1]
-    artifacts = output / run["artifact_directory"]
-    draft = artifacts / "bozza.txt"
-    if not draft.is_file() or not draft.stat().st_size:
-        return None
-    evidence = artifacts / "evidenze.md"
-    if not evidence.is_file() or not evidence.stat().st_size:
-        return None
+    artifact_files = []
+    if directory := run.get("artifact_directory"):
+        artifacts = output / directory
+        draft_name = "bozza.txt" if record["status"] == "completed" else "risposta.parziale.json"
+        candidates = [artifacts / draft_name, artifacts / "evidenze.md"]
+        if TOOL_RESULTS_FILE in (record.get("artifact_hashes") or {}):
+            candidates.append(artifacts / TOOL_RESULTS_FILE)
+        artifact_files = [path for path in candidates if path.is_file() and path.stat().st_size]
     config = record["model_config"]
     metrics = record["llm"]
     hardware = record.get("spark_monitor", {"status": "not_collected"})
-    snapshot = read_json(output / hardware["path"]) if hardware.get("path") else {}
+    snapshot = {}
+    if hardware.get("path"):
+        try:
+            snapshot = read_json(output / hardware["path"])
+            if not isinstance(snapshot, dict):
+                raise ValueError("Snapshot hardware non valido")
+        except (OSError, ValueError) as exc:
+            snapshot = {}
+            hardware = {"status": "unavailable", "error_type": type(exc).__name__}
+    artifact_names = [path.name for path in artifact_files]
+    snapshot_file = "spark.json" if snapshot else None
     sheet = {
         "run_id": record["run_id"],
+        "archive_version": ARCHIVE_VERSION,
         "context_id": run["context_id"],
+        "display_name": run.get("display_name"),
         "dataset_version": run["dataset_version"],
         "status": record["status"],
         "error_type": record["error_type"],
@@ -68,26 +118,40 @@ def archive_run(
             else None
         ),
         "tools_enabled": config["tools_enabled"],
-        "draft_file": draft.name,
+        "draft_file": "bozza.txt" if "bozza.txt" in artifact_names else None,
         "draft_technical_validation": record.get("draft_technical_validation"),
-        "artifact_files": [draft.name, evidence.name],
+        "technical_first_pass": record.get("technical_first_pass"),
+        "deterministic_repair": record.get("deterministic_repair"),
+        "artifact_files": artifact_names,
+        "hardware_snapshot_file": snapshot_file,
         "reference": {"status": "pending"},
     }
     with TemporaryDirectory(prefix=".prova-", dir=destination.parent) as staging:
         staging = Path(staging)
-        copyfile(draft, staging / draft.name)
-        copyfile(evidence, staging / evidence.name)
+        for path in artifact_files:
+            copyfile(path, staging / path.name)
+        if snapshot_file:
+            save_snapshot(staging / snapshot_file, snapshot)
         save_snapshot(
             staging / "metriche.json",
             {
                 "run_id": record["run_id"],
+                "status": record["status"],
+                "error_type": record["error_type"],
                 "prompt_version": record.get("prompt_version"),
                 "draft_technical_validation": record.get("draft_technical_validation"),
                 "token_e_stream": metrics,
                 "input_tokens_estimate": record.get("input_tokens_estimate"),
+                "input_tokens_breakdown": record.get("input_tokens_breakdown"),
+                "input_estimate_method": record.get("input_estimate_method"),
+                "input_tokenizer_revision": record.get("input_tokenizer_revision"),
                 "initial_evidence_count": record.get("initial_evidence_count"),
                 "evidence_count": record.get("evidence_count"),
                 "timings": record["timings"],
+                "model_config": config,
+                "request_settings": record.get("request_settings"),
+                "software": record.get("software"),
+                "failure_stage": record.get("failure_stage"),
                 "trace_id": record["trace_id"],
                 "telemetry": record["telemetry"],
                 "hardware_spark": {
@@ -97,14 +161,14 @@ def archive_run(
                     "error_type": hardware.get("error_type"),
                     "samples_in_run": snapshot.get("run", {}).get("series"),
                     "energy_in_run": snapshot.get("run", {}).get("energy"),
+                    "energy_by_source_in_run": snapshot.get("run", {}).get("energy_by_source"),
+                    "summary_in_run": snapshot.get("run", {}).get("summary"),
                     "energy_monitor_window": snapshot.get("energy"),
                     "monitor_window_hours": snapshot.get("requested_hours"),
                 },
             },
         )
-        archive_reference(staging, sheet, base_url=base_url, token=token)
-        if sheet["reference"]["status"] != "saved":
-            raise ReferenceUnavailable
+        save_snapshot(staging / SHEET, sheet)
         staging.rename(destination)
     return sheet
 
@@ -136,54 +200,59 @@ def archive_reference(directory: Path, sheet: dict, *, base_url: str, token: str
     sheet["reference"] = reference
 
 
-def run_worker(root: Path, output: Path, *, base_url: str, token: str) -> None:
+def run_worker(
+    root: Path, output: Path, *, base_url: str, token: str, model: str | None = None
+) -> None:
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
         reset_at = (root / RESET_MARKER).stat().st_mtime_ns
     except FileNotFoundError:
         reset_at = None
     archived = set()
-    unavailable = set()
     pending = {}
     number = 0
-    for directory in root.glob(f"{PREFIX}*"):
-        if not re.fullmatch(rf"{PREFIX}[0-9]+", directory.name):
+    for directory in root.iterdir():
+        legacy = re.fullmatch(rf"{LEGACY_PREFIX}([0-9]+)", directory.name)
+        if legacy is None and not re.fullmatch(rf"{CASE_PREFIX}[A-Z0-9-]+", directory.name):
             continue
-        number = max(number, int(directory.name.removeprefix(PREFIX)))
+        if legacy:
+            number = max(number, int(legacy[1]))
         try:
             sheet = read_json(directory / SHEET)
             archived.add(sheet["run_id"])
         except (OSError, ValueError, KeyError, TypeError):
             logger.warning("Scheda storica non leggibile; numero di archivio riservato")
             continue
+        if model is not None and sheet.get("model") != model:
+            continue
         if (
-            sheet.get("status") == "completed"
-            and sheet.get("draft_file") == "bozza.txt"
-            and (sheet.get("reference") or {}).get("status") == "pending"
-        ):
+            sheet.get("archive_version") == ARCHIVE_VERSION
+            or (sheet.get("status") == "completed" and sheet.get("draft_file") == "bozza.txt")
+        ) and (sheet.get("reference") or {}).get("status") == "pending":
             pending[directory] = sheet
 
     while True:
         for path in sorted(output.glob("dimissioni*/registro/*.json")):
-            if path.stem in archived or path.stem in unavailable:
+            if path.stem in archived:
                 continue
             try:
                 if reset_at is not None and path.stat().st_mtime_ns <= reset_at:
                     continue
                 record = read_json(path)
-                destination = root / f"{PREFIX}{number + 1}"
-                sheet = archive_run(destination, path, record, base_url=base_url, token=token)
-            except ReferenceUnavailable:
-                unavailable.add(path.stem)
-                logger.warning("Originale indisponibile (HTTP 404); prova non pubblicata")
-                continue
+                run = _archivable_run(record)
+                if run is None or (model is not None and record["model_config"]["model"] != model):
+                    continue
+                destination = _archive_destination(root, path, record, run, number)
+                sheet = archive_run(destination, path, record)
             except (OSError, ValueError, KeyError, AttributeError) as exc:
                 logger.warning("Scrittura archivio da riprovare (%s)", type(exc).__name__)
                 continue
             if sheet is None:
                 continue
-            number += 1
+            if destination.name.startswith(LEGACY_PREFIX):
+                number += 1
             archived.add(sheet["run_id"])
+            pending[destination] = sheet
         for directory, sheet in list(pending.items()):
             try:
                 archive_reference(directory, sheet, base_url=base_url, token=token)
@@ -202,4 +271,5 @@ if __name__ == "__main__":
             Path("output"),
             base_url=os.environ["REFERENCE_API_URL"],
             token=token,
+            model=os.getenv("TESI_SPARK_ARCHIVE_MODEL") or None,
         )

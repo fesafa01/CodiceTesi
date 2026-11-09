@@ -65,7 +65,12 @@ class DocumentaryTools:
                     raise FinalPhaseToolCallError(operation)
                 result = self._execute(operation, **args)
                 ids = sorted(self._result_evidences(result["items"]))
-                entry.update(status="completed", evidence_ids=ids)
+                entry.update(
+                    status="completed",
+                    evidence_ids=ids,
+                    results_count=len(result["items"]),
+                    matches_total=result["matches_total"],
+                )
                 self.consulted.update(ids)
                 self.results.append({"tool": operation, "result": result})
                 if span is not None:
@@ -160,7 +165,15 @@ class DocumentaryTools:
             "offset": offset,
             "next_offset": None,
             "coverage": {
+                "extraction_version": self.facts.extraction_version,
                 "recognized_facts": len(self.facts.facts),
+                "empty_reason": (
+                    "inventory_empty"
+                    if not self.facts.facts
+                    else "no_matching_records"
+                    if not items
+                    else None
+                ),
                 "passages_not_interpreted": sum(
                     e.source_id in self._sources
                     and self._sources[e.source_id].kind != "contesto_verificato"
@@ -195,6 +208,22 @@ class DocumentaryTools:
     def audit(self) -> dict:
         # I risultati sono destinati al modello, mai all'audit o alla telemetria.
         return {"calls": self.calls, "consulted_evidence_ids": sorted(self.consulted)}
+
+    def summary(self) -> dict:
+        """Contatori tecnici senza testi, etichette, argomenti o ID delle evidenze."""
+        return {
+            "extraction_version": self.facts.extraction_version,
+            "recognized_facts": len(self.facts.facts),
+            "executed": len(self.calls),
+            "completed": sum(c["status"] == "completed" for c in self.calls),
+            "failed": sum(c["status"] == "failed" for c in self.calls),
+            "empty": sum(
+                c["status"] == "completed" and c["matches_total"] == 0 for c in self.calls
+            ),
+            "nonempty": sum(
+                c["status"] == "completed" and c["matches_total"] > 0 for c in self.calls
+            ),
+        }
 
 
 def _execute_for_model(ctx: RunContext[DocumentaryTools], operation: str, **args) -> dict:
@@ -272,7 +301,7 @@ async def ricostruisci_sequenza_eventi(
     """Ordina i fatti strutturati documentati, con stato, attributi e riferimenti.
 
     Non interpreta note libere o cause cliniche. Date AAAA-MM-GG inclusive.
-    Con orari/fusi incompleti dichiara l'ordinamento per sola data.
+    Distingue istanti con fuso, orari locali documentati e sola data ambigua.
     """
     return _execute_for_model(
         ctx, "ricostruisci_sequenza_eventi", tipo=tipo, dal=dal, al=al, limit=limit, offset=offset

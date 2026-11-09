@@ -1,0 +1,112 @@
+{
+  "fixture_only": true,
+  "clinical_sample_files_read": 0,
+  "counts_toward_180": false,
+  "results": [
+    {
+      "model": "qwen3.8:27b",
+      "fixture_only": true,
+      "guided_diagnostic": true,
+      "effective_reasoning": "low",
+      "elapsed_seconds": 37.48,
+      "passed": true,
+      "checks": {
+        "all_four_tools_called": true,
+        "all_four_tools_nonempty": true,
+        "no_execution_errors": true,
+        "no_argument_rejections": true,
+        "results_in_followup_request": true,
+        "final_answers_match_invented_fixture": true
+      },
+      "calls_by_tool": {
+        "riepiloga_osservazioni": 1,
+        "ricostruisci_terapia_documentata": 1,
+        "ricostruisci_sequenza_eventi": 1,
+        "leggi_evidenze": 1
+      },
+      "tool_results_in_followup": 4,
+      "model_requests": 2,
+      "tool_summary": {
+        "extraction_version": "mimic-record-v1",
+        "recognized_facts": 4,
+        "executed": 4,
+        "completed": 4,
+        "failed": 0,
+        "empty": 0,
+        "nonempty": 4,
+        "requested": 4,
+        "arguments_rejected": 0
+      }
+    },
+    {
+      "model": "gemma4:31b",
+      "fixture_only": true,
+      "guided_diagnostic": true,
+      "effective_reasoning": "low",
+      "elapsed_seconds": 42.46,
+      "passed": true,
+      "checks": {
+        "all_four_tools_called": true,
+        "all_four_tools_nonempty": true,
+        "no_execution_errors": true,
+        "no_argument_rejections": true,
+        "results_in_followup_request": true,
+        "final_answers_match_invented_fixture": true
+      },
+      "calls_by_tool": {
+        "riepiloga_osservazioni": 1,
+        "ricostruisci_terapia_documentata": 1,
+        "ricostruisci_sequenza_eventi": 1,
+        "leggi_evidenze": 1
+      },
+      "tool_results_in_followup": 4,
+      "model_requests": 2,
+      "tool_summary": {
+        "extraction_version": "mimic-record-v1",
+        "recognized_facts": 4,
+        "executed": 4,
+        "completed": 4,
+        "failed": 0,
+        "empty": 0,
+        "nonempty": 4,
+        "requested": 4,
+        "arguments_rejected": 0
+      }
+    },
+    {
+      "model": "frob/mistral-small-4:119b",
+      "fixture_only": true,
+      "guided_diagnostic": true,
+      "effective_reasoning": "high",
+      "elapsed_seconds": 42.52,
+      "passed": false,
+      "checks": {
+        "all_four_tools_called": true,
+        "all_four_tools_nonempty": true,
+        "no_execution_errors": true,
+        "no_argument_rejections": true,
+        "results_in_followup_request": true,
+        "final_answers_match_invented_fixture": false
+      },
+      "calls_by_tool": {
+        "riepiloga_osservazioni": 1,
+        "ricostruisci_terapia_documentata": 1,
+        "ricostruisci_sequenza_eventi": 1,
+        "leggi_evidenze": 1
+      },
+      "tool_results_in_followup": 4,
+      "model_requests": 2,
+      "tool_summary": {
+        "extraction_version": "mimic-record-v1",
+        "recognized_facts": 4,
+        "executed": 4,
+        "completed": 4,
+        "failed": 0,
+        "empty": 0,
+        "nonempty": 4,
+        "requested": 4,
+        "arguments_rejected": 0
+      }
+    }
+  ]
+}

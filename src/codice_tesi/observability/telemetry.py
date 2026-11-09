@@ -42,7 +42,7 @@ class Telemetry:
         resource = Resource.create(
             {
                 "service.name": "codice-tesi",
-                "service.version": "0.1.0",
+                "service.version": "0.2.0",
                 "openinference.project.name": config.project,
                 "deployment.environment.name": "local",
             }

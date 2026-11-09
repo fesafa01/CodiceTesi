@@ -8,6 +8,11 @@ class ExecutionTimeoutError(ValueError):
     pass
 
 
+class ModelOutputLimitError(ValueError):
+    def __init__(self):
+        super().__init__("Il modello ha raggiunto il limite di token in uscita.")
+
+
 class ToolCallValidationError(ValueError):
     """Messaggio sicuro: non contiene gli argomenti emessi dal modello."""
 

@@ -66,11 +66,24 @@ def test_model_selection_routes_to_ollama_or_existing_serving(monkeypatch):
     assert Settings().model == DEEPSEEK_MODEL
 
 
+@pytest.mark.parametrize("model", [GEMMA_MODEL, MISTRAL_MODEL])
+def test_gemma_and_mistral_have_a_separate_timeout_setting(monkeypatch, model):
+    monkeypatch.setenv("LLM_TIMEOUT", "750")
+    monkeypatch.setenv("LLM_FIRST_TEXT_TIMEOUT", "700")
+    monkeypatch.setenv("LLM_GEMMA_MISTRAL_TIMEOUT", "650")
+    settings = Settings().for_model(model)
+    assert settings.timeout == settings.first_text_timeout == 650
+    qwen = Settings().for_model(QWEN_MODEL)
+    assert qwen.timeout == 750
+    assert qwen.first_text_timeout == 700
+
+
 @pytest.mark.parametrize(("thinking", "effort"), [(True, "low"), (False, "none")])
 @pytest.mark.parametrize("model", [QWEN_MODEL, GEMMA_MODEL, MISTRAL_MODEL])
 def test_ollama_uses_reasoning_and_json_mode(model, thinking, effort):
     settings = ModelConfig(model=model, thinking=thinking).request_settings()
-    assert settings["openai_reasoning_effort"] == effort
+    expected = "high" if model == MISTRAL_MODEL and thinking else effort
+    assert settings["openai_reasoning_effort"] == expected
     assert settings["extra_body"] == {"response_format": {"type": "json_object"}}
 
 

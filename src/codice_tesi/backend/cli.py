@@ -2,6 +2,8 @@
 
 import argparse
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import secrets
@@ -30,8 +32,18 @@ def main(argv: list[str] | None = None) -> None:
     mimic.add_argument("notes", type=Path, help="Cartella note con discharge e radiology.")
     mimic.add_argument("--ed", type=Path, help="Cartella ED 2.2 per il campione misto.")
     mimic.add_argument("--icu", type=Path, help="Cartella ICU 2.2 per il campione misto.")
+    mimic.add_argument(
+        "--hosp-ed-only",
+        action="store_true",
+        help="Bilancia Hosp e Hosp + ED, escludendo i passaggi in ICU da Hosp/transfers.",
+    )
     mimic.add_argument("--limit", type=int, default=20, help=f"Ricoveri (1–{MAX_CASES}).")
     mimic.add_argument("--seed", type=int, default=42, help="Seed di selezione riproducibile.")
+    mimic.add_argument(
+        "--max-input-tokens",
+        type=int,
+        help="Tetto per candidato HOSP/HOSP + ED, con stima prudenziale per i tre modelli.",
+    )
     mimic.add_argument(
         "--min-discharge-cases",
         type=int,
@@ -52,6 +64,52 @@ def main(argv: list[str] | None = None) -> None:
     mimic.add_argument("--replace", action="store_true", help="Sostituisce il solo campione MIMIC.")
     mimic.add_argument(
         "--access-file", type=Path, help="Scrive token e assegnazioni locali in un file privato."
+    )
+    clinical = commands.add_parser(
+        "add-clinical-candidates",
+        help="Aggiunge una rosa clinica separata, conservando il campione MIMIC presente.",
+    )
+    clinical.add_argument("hosp", type=Path)
+    clinical.add_argument("notes", type=Path)
+    clinical.add_argument("--ed", type=Path, required=True)
+    clinical.add_argument("--limit", type=int, default=10)
+    clinical.add_argument("--seed", type=int, default=20261109)
+    clinical.add_argument(
+        "--min-input-tokens",
+        type=int,
+        default=0,
+        help="Floor sul minimo delle tre stime; 0 lo disattiva.",
+    )
+    clinical.add_argument(
+        "--max-input-tokens",
+        type=int,
+        default=80000,
+        help="Ceiling sul massimo delle tre stime prudenziali.",
+    )
+    clinical.add_argument(
+        "--pool-per-profile",
+        type=int,
+        default=30,
+        help="Pazienti da approfondire per ciascun profilo prima del filtro token.",
+    )
+    clinical.add_argument("--expect-existing", type=int, default=30)
+    clinical.add_argument(
+        "--source-profile",
+        choices=("clinical", "complete"),
+        default="clinical",
+        help="Selezione clinica di righe intere o intero estratto nel prompt.",
+    )
+    clinical.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Prepara e verifica la rosa senza aggiungerla al database.",
+    )
+    clinical.add_argument("--report-dir", type=Path, required=True)
+    clinical.add_argument(
+        "--access-file",
+        type=Path,
+        required=True,
+        help="File esistente: conserva token e assegnazioni e aggiunge i nuovi casi.",
     )
     audit = commands.add_parser(
         "audit-mimic", help="Confronta gli ordini nei CSV Hosp con il campione PostgreSQL."
@@ -108,11 +166,20 @@ def main(argv: list[str] | None = None) -> None:
 
 
 async def run_command(settings, args):
+    if args.command == "add-clinical-candidates":
+        from codice_tesi.backend.clinical_candidates import run_clinical_candidates
+
+        async with Database(settings) as database:
+            await run_clinical_candidates(database, args)
+        return
     if args.command == "audit-mimic-candidates":
         audit_candidate_coverage(args.hosp, args.notes, args.ed, args.icu, extended=args.extended)
         return
     if args.command == "import-mimic":
-        contexts, sources, references = load_mimic(
+        budget = args.max_input_tokens
+        if budget is not None and (budget < 1 or not args.hosp_ed_only or args.rich_pilot):
+            raise ValueError("--max-input-tokens richiede --hosp-ed-only e l'estrazione compatta.")
+        loaded = load_mimic(
             args.hosp,
             args.notes,
             limit=args.limit,
@@ -122,9 +189,17 @@ async def run_command(settings, args):
             min_discharge_cases=args.min_discharge_cases,
             min_complete_cases=args.min_complete_cases,
             rich_pilot=args.rich_pilot,
+            hosp_ed_only=args.hosp_ed_only,
+            candidate_batches=budget is not None,
         )
-        if args.ed is not None:
-            validate_mimic_requests(contexts, sources)
+        if budget is not None:
+            contexts, sources, references = select_mimic_within_budget(
+                loaded, limit=args.limit, budget=budget
+            )
+        else:
+            contexts, sources, references = loaded
+            if args.ed is not None:
+                validate_mimic_requests(contexts, sources)
     async with Database(settings) as database:
         if args.command == "init":
             await initialize_database(database)
@@ -146,6 +221,107 @@ async def run_command(settings, args):
         elif args.command == "compare-mimic":
             await compare_mimic(database, args.draft, args.destination)
             print(f"Confronto salvato: {args.destination}")
+
+
+def select_mimic_within_budget(batches, *, limit, budget):
+    from collections import Counter, defaultdict
+
+    from codice_tesi.config import GEMMA_MODEL, QWEN_MODEL, ModelConfig
+    from codice_tesi.discharge.config import ContextConfig
+    from codice_tesi.discharge.context import prepare_request
+    from codice_tesi.discharge.models import CompositionPacket
+    from codice_tesi.discharge.template import load_template
+
+    # Gemma e Mistral condividono la stima prudenziale in byte UTF-8.
+    models = [
+        ModelConfig(model=name, thinking=True, tools_enabled=True)
+        for name in (QWEN_MODEL, GEMMA_MODEL)
+    ]
+    template = load_template()
+    quota = limit // 2
+    eligible = {False: set(), True: set()}
+    candidates = []
+    rejected = Counter()
+    for contexts, sources, references in batches:
+        by_context = defaultdict(list)
+        for source in sources:
+            by_context[source.context_id].append(source)
+        for context in contexts:
+            evidence = by_context[context.id]
+            has_ed = any(source.origin == "ed/edstays" for source in evidence)
+            patients = eligible[has_ed]
+            if context.patient_id in patients or len(patients) == limit:
+                continue
+            packet = CompositionPacket(context=context, sources=tuple(evidence), template=template)
+            estimate = max(
+                prepare_request(
+                    packet, ContextConfig(), output_tokens=model.max_tokens, model_config=model
+                ).input_tokens_estimate
+                for model in models
+            )
+            if estimate > budget:
+                rejected[has_ed] += 1
+                continue
+            patients.add(context.patient_id)
+            candidates.append((context, evidence, references[context.id], has_ed, estimate))
+            if (
+                all(len(group) >= quota for group in eligible.values())
+                and len(eligible[False] | eligible[True]) >= limit
+            ):
+                break
+        else:
+            continue
+        break
+    else:
+        raise ValueError(
+            f"Entro il budget {budget}: {min(len(eligible[False]), quota)}/{quota} HOSP e "
+            f"{min(len(eligible[True]), quota)}/{quota} HOSP + ED. Campione insufficiente "
+            "dopo aver esaurito la graduatoria. "
+            f"Oltre soglia: {rejected[False]} HOSP e {rejected[True]} HOSP + ED."
+        )
+
+    selected, selected_sources, estimates = [], [], []
+    selected_references = {}
+    used, counts = set(), Counter()
+    for context, evidence, notes, has_ed, estimate in candidates:
+        patient = context.patient_id
+        other_patients = eligible[not has_ed] - used
+        if (
+            counts[has_ed] == quota
+            or patient in used
+            or (patient in other_patients and len(other_patients) == quota - counts[not has_ed])
+        ):
+            continue
+        used.add(patient)
+        counts[has_ed] += 1
+        label = "Caso Hosp e ED" if has_ed else "Caso Hosp"
+        selected.append(context.model_copy(update={"display_name": f"{label} {counts[has_ed]}"}))
+        selected_sources.extend(evidence)
+        selected_references[context.id] = notes
+        estimates.append(estimate)
+    digest = hashlib.sha256(
+        json.dumps(
+            [
+                [
+                    context.model_dump(exclude={"dataset_version"}, mode="json")
+                    for context in selected
+                ],
+                [(source.id, source.sha256) for source in selected_sources],
+                selected_references,
+            ],
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    print(
+        f"Pacchetti entro budget, senza inferenza: {limit}; "
+        f"{min(estimates)}–{max(estimates)} unità di input prudenziali "
+        f"(tetto {budget}, scartati {sum(rejected.values())})."
+    )
+    return (
+        [context.model_copy(update={"dataset_version": digest}) for context in selected],
+        [source.model_copy(update={"version": digest}) for source in selected_sources],
+        selected_references,
+    )
 
 
 def validate_mimic_requests(contexts, sources) -> None:

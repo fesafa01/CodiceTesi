@@ -11,16 +11,17 @@ services:
     env_file:
       - path: .env
         required: false
-      - path: ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/var/mimic/access.env
+      - path: ${TESI_PRIVATE_DIR:-../codice-tesi-private}/var/mimic/access.env
         required: false
     environment:
+      LLM_MODEL: "${LLM_MODEL:-qwen3.8:27b}"
       TESI_OUTPUT_DIR: /app/output
       APP_BACKEND_URL: http://backend:8001
       TELEMETRY_ENABLED: "true"
       TELEMETRY_ENDPOINT: http://otel-collector:4318
       TELEMETRY_PROJECT: tesi-dimissioni
     volumes:
-      - ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/output:/app/output
+      - ${TESI_PRIVATE_DIR:-../codice-tesi-private}/output:/app/output
     depends_on:
       backend:
         condition: service_healthy
@@ -42,7 +43,7 @@ services:
     build: ./web
     init: true
     env_file:
-      - path: ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/var/mimic/access.env
+      - path: ${TESI_PRIVATE_DIR:-../codice-tesi-private}/var/mimic/access.env
         required: false
     environment:
       APP_BACKEND_URL: http://backend:8001
@@ -111,7 +112,7 @@ services:
       target: backend
     init: true
     env_file:
-      - path: ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/var/mimic/access.env
+      - path: ${TESI_PRIVATE_DIR:-../codice-tesi-private}/var/mimic/access.env
         required: false
     environment:
       CLINICAL_DATABASE_URL: postgresql://clinical_reader:lettura_sintetica@db:5432/clinico
@@ -137,7 +138,7 @@ services:
     init: true
     command: ["serve-reference"]
     env_file:
-      - path: ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/var/mimic/access.env
+      - path: ${TESI_PRIVATE_DIR:-../codice-tesi-private}/var/mimic/access.env
         required: false
     environment:
       CLINICAL_DATABASE_URL: postgresql://clinical_reference_reader:${CLINICAL_REFERENCE_READER_PASSWORD:-lettura_riferimento_locale}@db:5432/clinico
@@ -162,14 +163,15 @@ services:
     entrypoint: ["python", "-m", "codice_tesi.observability.spark_archive"]
     init: true
     env_file:
-      - path: ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/var/mimic/access.env
+      - path: ${TESI_PRIVATE_DIR:-../codice-tesi-private}/var/mimic/access.env
         required: false
     environment:
       REFERENCE_API_URL: http://reference-api:8001
+      TESI_SPARK_ARCHIVE_MODEL: "${LLM_MODEL:-qwen3.8:27b}"
     networks: [reference-review]
     volumes:
-      - ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/output:/app/output:ro
-      - ${TESI_PRIVATE_DIR:-${HOME}/Desktop/codice-tesi-private}/TEST-SPARK:/app/TEST-SPARK
+      - ${TESI_PRIVATE_DIR:-../codice-tesi-private}/output:/app/output:ro
+      - ${TESI_PRIVATE_DIR:-../codice-tesi-private}/${TESI_SPARK_ARCHIVE_DIR:-TEST-SPARK-QWEN}:/app/TEST-SPARK
     depends_on:
       agent-api:
         condition: service_started

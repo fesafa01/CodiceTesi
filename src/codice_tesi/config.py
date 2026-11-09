@@ -14,6 +14,7 @@ QWEN_MODEL = "qwen3.8:27b"
 GEMMA_MODEL = "gemma4:31b"
 MISTRAL_MODEL = "frob/mistral-small-4:119b"
 OLLAMA_MODELS = frozenset({QWEN_MODEL, GEMMA_MODEL, MISTRAL_MODEL})
+DEFAULT_FIRST_TEXT_TIMEOUT = 240
 
 
 def default_output_dir() -> Path:
@@ -22,7 +23,7 @@ def default_output_dir() -> Path:
     if output_root := os.getenv("TESI_OUTPUT_DIR"):
         root = Path(output_root).expanduser()
     elif mimic:
-        private = os.getenv("TESI_PRIVATE_DIR", "~/Desktop/codice-tesi-private")
+        private = os.getenv("TESI_PRIVATE_DIR", "../codice-tesi-private")
         root = Path(private).expanduser() / "output"
     else:
         root = Path("output")
@@ -45,7 +46,7 @@ class ModelConfig(BaseModel):
     thinking: bool = True
     reasoning_effort: str | None = Field(default="low", min_length=1)
     # Prima del testo, ogni evento di reasoning rinnova questo limite di inattività.
-    first_text_timeout: float = Field(default=240, gt=0)
+    first_text_timeout: float = Field(default=DEFAULT_FIRST_TEXT_TIMEOUT, gt=0, allow_inf_nan=False)
     # Nessuna durata massima, salvo un limite richiesto esplicitamente.
     total_timeout: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     tools_enabled: bool = False
@@ -64,8 +65,13 @@ class ModelConfig(BaseModel):
         if self.stop is not None:
             values["stop_sequences"] = self.stop
         if self.model in OLLAMA_MODELS:
+            # Il template Mistral accetta solo "none" e "high".
             values["openai_reasoning_effort"] = (
-                self.reasoning_effort or "medium" if self.thinking else "none"
+                "none"
+                if not self.thinking
+                else "high"
+                if self.model == MISTRAL_MODEL
+                else self.reasoning_effort or "medium"
             )
             values["extra_body"] = {"response_format": {"type": "json_object"}}
             return OpenAIChatModelSettings(**values)
@@ -88,11 +94,16 @@ class Settings(BaseSettings):
     base_url: AnyHttpUrl = AnyHttpUrl(SPARK_LLM_URL)
     ollama_base_url: AnyHttpUrl = AnyHttpUrl(SPARK_OLLAMA_URL)
     api_key: SecretStr = Field(default=SecretStr("not-required"), min_length=1)
-    timeout: float = Field(default=300, gt=0)
+    timeout: float = Field(default=300, gt=0, allow_inf_nan=False)
+    first_text_timeout: float = Field(default=DEFAULT_FIRST_TEXT_TIMEOUT, gt=0, allow_inf_nan=False)
+    gemma_mistral_timeout: float = Field(default=600, gt=0, allow_inf_nan=False)
 
     def for_model(self, model: str) -> "Settings":
-        if model in OLLAMA_MODELS:
-            return self.model_copy(
-                update={"base_url": self.ollama_base_url, "api_key": SecretStr("ollama")}
+        if model not in OLLAMA_MODELS:
+            return self
+        overrides = {"base_url": self.ollama_base_url, "api_key": SecretStr("ollama")}
+        if model in {GEMMA_MODEL, MISTRAL_MODEL}:
+            overrides.update(
+                timeout=self.gemma_mistral_timeout, first_text_timeout=self.gemma_mistral_timeout
             )
-        return self
+        return self.model_copy(update=overrides)

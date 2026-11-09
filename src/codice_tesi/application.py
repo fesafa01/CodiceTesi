@@ -207,11 +207,16 @@ async def run_application(
                                 except asyncio.CancelledError:
                                     pass
                     notify("controllo_risultato")
+                    if config.tools_enabled and (results := getattr(generator, "tool_results", [])):
+                        artifacts.save_tool_results(results)
                     artifacts.finish("bozza_da_revisionare", usage=generator.usage)
                     record.data["draft_sha256"] = sha256(artifacts.draft.read_bytes()).hexdigest()
                     record.data["draft_technical_validation"] = artifacts.report["tracciabilita"][
                         "technical"
                     ]
+                    for field in ("technical_first_pass", "deterministic_repair"):
+                        if field in artifacts.report["tracciabilita"]:
+                            record.data[field] = artifacts.report["tracciabilita"][field]
                     record.data["artifact_hashes"] = dict(artifacts.report["artefatti_sha256"])
                     record.finish("completed", llm=generator.usage.get("metrics"))
                     return artifacts.directory
@@ -257,6 +262,7 @@ async def run_application(
                     "archive_version": ARCHIVE_VERSION,
                     "context_id": packet.context.id,
                     "dataset_version": packet.context.dataset_version,
+                    "display_name": packet.context.display_name,
                     "artifact_directory": (
                         artifacts.directory.relative_to(output_dir.resolve()).as_posix()
                         if artifacts

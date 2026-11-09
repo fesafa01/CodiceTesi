@@ -1,0 +1,258 @@
+{
+  "experiment": "tool-prompt-v1-20261108",
+  "counts_toward_180": false,
+  "results": [
+    {
+      "id": "gemma-hosp-1",
+      "model": "gemma4:31b",
+      "case": "Caso Hosp 1",
+      "status": "completed",
+      "error_type": null,
+      "technical": "passed",
+      "technical_first_pass": "passed",
+      "tool_summary": {
+        "extraction_version": "mimic-record-v1",
+        "recognized_facts": 81,
+        "executed": 1,
+        "completed": 1,
+        "failed": 0,
+        "empty": 0,
+        "nonempty": 1,
+        "requested": 1,
+        "arguments_rejected": 0
+      },
+      "model_requests": 2,
+      "elapsed_seconds": 267.105545,
+      "wire_requests": [
+        {
+          "tools_available": 4,
+          "tool_names": [
+            "riepiloga_osservazioni",
+            "ricostruisci_terapia_documentata",
+            "ricostruisci_sequenza_eventi",
+            "leggi_evidenze"
+          ],
+          "tool_choice": "auto",
+          "response_format_enabled": false,
+          "reasoning_effort": "low",
+          "tool_return_messages": 0
+        },
+        {
+          "tools_available": 4,
+          "tool_names": [
+            "riepiloga_osservazioni",
+            "ricostruisci_terapia_documentata",
+            "ricostruisci_sequenza_eventi",
+            "leggi_evidenze"
+          ],
+          "tool_choice": "auto",
+          "response_format_enabled": false,
+          "reasoning_effort": "low",
+          "tool_return_messages": 1
+        }
+      ],
+      "baseline": {
+        "status": "completed",
+        "technical": "passed",
+        "technical_first_pass": "passed",
+        "requested": 0,
+        "model_requests": 1,
+        "prompt_version": "campus-mimic-v15-tools-v1"
+      },
+      "deterministic_repair": false,
+      "hardware_status": "captured",
+      "tools_called": [
+        "ricostruisci_sequenza_eventi"
+      ]
+    },
+    {
+      "id": "gemma-hosp-ed-1",
+      "model": "gemma4:31b",
+      "case": "Caso Hosp e ED 1",
+      "status": "completed",
+      "error_type": null,
+      "technical": "passed",
+      "technical_first_pass": "passed",
+      "tool_summary": {
+        "extraction_version": "mimic-record-v1",
+        "recognized_facts": 149,
+        "executed": 1,
+        "completed": 1,
+        "failed": 0,
+        "empty": 0,
+        "nonempty": 1,
+        "requested": 1,
+        "arguments_rejected": 0
+      },
+      "model_requests": 2,
+      "elapsed_seconds": 301.883135,
+      "wire_requests": [
+        {
+          "tools_available": 4,
+          "tool_names": [
+            "riepiloga_osservazioni",
+            "ricostruisci_terapia_documentata",
+            "ricostruisci_sequenza_eventi",
+            "leggi_evidenze"
+          ],
+          "tool_choice": "auto",
+          "response_format_enabled": false,
+          "reasoning_effort": "low",
+          "tool_return_messages": 0
+        },
+        {
+          "tools_available": 4,
+          "tool_names": [
+            "riepiloga_osservazioni",
+            "ricostruisci_terapia_documentata",
+            "ricostruisci_sequenza_eventi",
+            "leggi_evidenze"
+          ],
+          "tool_choice": "auto",
+          "response_format_enabled": false,
+          "reasoning_effort": "low",
+          "tool_return_messages": 1
+        }
+      ],
+      "baseline": {
+        "status": "completed",
+        "technical": "passed",
+        "technical_first_pass": "passed",
+        "requested": 0,
+        "model_requests": 1,
+        "prompt_version": "campus-mimic-v15-tools-v1"
+      },
+      "deterministic_repair": false,
+      "hardware_status": "captured",
+      "tools_called": [
+        "ricostruisci_sequenza_eventi"
+      ]
+    },
+    {
+      "id": "mistral-hosp-1",
+      "model": "frob/mistral-small-4:119b",
+      "case": "Caso Hosp 1",
+      "status": "completed",
+      "error_type": null,
+      "technical": "failed",
+      "technical_first_pass": "failed",
+      "tool_summary": {
+        "extraction_version": "mimic-record-v1",
+        "recognized_facts": 81,
+        "executed": 1,
+        "completed": 1,
+        "failed": 0,
+        "empty": 0,
+        "nonempty": 1,
+        "requested": 1,
+        "arguments_rejected": 0
+      },
+      "model_requests": 2,
+      "elapsed_seconds": 213.014002,
+      "wire_requests": [
+        {
+          "tools_available": 4,
+          "tool_names": [
+            "riepiloga_osservazioni",
+            "ricostruisci_terapia_documentata",
+            "ricostruisci_sequenza_eventi",
+            "leggi_evidenze"
+          ],
+          "tool_choice": "auto",
+          "response_format_enabled": false,
+          "reasoning_effort": "high",
+          "tool_return_messages": 0
+        },
+        {
+          "tools_available": 4,
+          "tool_names": [
+            "riepiloga_osservazioni",
+            "ricostruisci_terapia_documentata",
+            "ricostruisci_sequenza_eventi",
+            "leggi_evidenze"
+          ],
+          "tool_choice": "auto",
+          "response_format_enabled": false,
+          "reasoning_effort": "high",
+          "tool_return_messages": 1
+        }
+      ],
+      "baseline": {
+        "status": "completed",
+        "technical": "passed",
+        "technical_first_pass": "passed",
+        "requested": 0,
+        "model_requests": 1,
+        "prompt_version": "campus-mimic-v15-tools-v1"
+      },
+      "deterministic_repair": false,
+      "hardware_status": "captured",
+      "tools_called": [
+        "ricostruisci_sequenza_eventi"
+      ]
+    },
+    {
+      "id": "mistral-hosp-ed-1",
+      "model": "frob/mistral-small-4:119b",
+      "case": "Caso Hosp e ED 1",
+      "status": "completed",
+      "error_type": null,
+      "technical": "passed",
+      "technical_first_pass": "failed",
+      "tool_summary": {
+        "extraction_version": "mimic-record-v1",
+        "recognized_facts": 149,
+        "executed": 1,
+        "completed": 1,
+        "failed": 0,
+        "empty": 0,
+        "nonempty": 1,
+        "requested": 1,
+        "arguments_rejected": 0
+      },
+      "model_requests": 2,
+      "elapsed_seconds": 126.677702,
+      "wire_requests": [
+        {
+          "tools_available": 4,
+          "tool_names": [
+            "riepiloga_osservazioni",
+            "ricostruisci_terapia_documentata",
+            "ricostruisci_sequenza_eventi",
+            "leggi_evidenze"
+          ],
+          "tool_choice": "auto",
+          "response_format_enabled": false,
+          "reasoning_effort": "high",
+          "tool_return_messages": 0
+        },
+        {
+          "tools_available": 4,
+          "tool_names": [
+            "riepiloga_osservazioni",
+            "ricostruisci_terapia_documentata",
+            "ricostruisci_sequenza_eventi",
+            "leggi_evidenze"
+          ],
+          "tool_choice": "auto",
+          "response_format_enabled": false,
+          "reasoning_effort": "high",
+          "tool_return_messages": 1
+        }
+      ],
+      "baseline": {
+        "status": "completed",
+        "technical": "failed",
+        "technical_first_pass": "failed",
+        "requested": 0,
+        "model_requests": 1,
+        "prompt_version": "campus-mimic-v15-tools-v1"
+      },
+      "deterministic_repair": true,
+      "hardware_status": "captured",
+      "tools_called": [
+        "ricostruisci_sequenza_eventi"
+      ]
+    }
+  ]
+}

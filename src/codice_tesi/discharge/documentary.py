@@ -18,17 +18,62 @@ def _instant(value: str) -> datetime:
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed
 
 
-def _ordered(facts: list[DocumentFact]) -> tuple[list[DocumentFact], bool]:
-    # Date prive di ora/fuso non consentono un ordinamento assoluto con timestamp
-    # completi. In quel caso si espone soltanto l'ordine delle date documentate.
-    precise = all(
-        fact.event_time and "T" in fact.event_time and _instant(fact.event_time).tzinfo
-        for fact in facts
+def _ordered(facts: list[DocumentFact]) -> tuple[list[DocumentFact], str]:
+    # Orari tutti locali si confrontano come documentati, senza inventare fusi.
+    # Date senza ora o una miscela di orari con/senza fuso impongono la sola data.
+    clocks = bool(facts) and all(f.event_time and "T" in f.event_time for f in facts)
+    zones = {_instant(f.event_time).tzinfo is not None for f in facts} if clocks else set()
+    ordering = (
+        "instant"
+        if zones == {True}
+        else "documented_local_time"
+        if zones == {False}
+        else "documented_date_only"
     )
     return sorted(
         facts,
-        key=lambda f: (_instant(f.event_time) if precise else f.event_time[:10], f.id),
-    ), bool(precise)
+        key=lambda f: (
+            _instant(f.event_time) if ordering != "documented_date_only" else f.event_time[:10],
+            f.id,
+        ),
+    ), ordering
+
+
+def _medication_details(fact):
+    role = fact.attributes.get("record_role")
+    if role:
+        fields = fact.attributes["record_fields"]
+        dose = (
+            ("dose_given", "amount")
+            if fact.kind == "MedicationAdministration"
+            else ("dose_val_rx",)
+        )
+        units = (
+            ("dose_given_unit", "amountuom")
+            if fact.kind == "MedicationAdministration"
+            else ("dose_unit_rx",)
+        )
+        timing = ("frequency", "doses_per_24_hrs", "disp_sched", "infusion_rate", "rate")
+        groups = {"dose": dose, "dose_unit": units, "route": ("route",), "regimen_timing": timing}
+
+        # Le liste di attributi discordanti restano nel risultato; non attestano
+        # una dose univoca. La data di un evento non è un regime di somministrazione.
+        def present(names):
+            return any(isinstance(fields.get(k), str) and fields[k] for k in names)
+
+        return {
+            "record_role": role,
+            "dosage_documented": present((*dose, *units, "route", *timing)),
+            "missing_structured_fields": [
+                key for key, names in groups.items() if not present(names)
+            ],
+        }
+    dosage = fact.attributes.get("dosageInstruction", fact.attributes.get("dosage", []))
+    return {
+        "record_role": "prescription" if fact.kind == "MedicationRequest" else "administration",
+        "dosage_documented": bool(dosage),
+        "missing_structured_fields": _missing_dosage_fields(dosage),
+    }
 
 
 def _missing_dosage_fields(dosage) -> list[str]:
@@ -93,14 +138,14 @@ class DocumentaryAnalysis:
             groups[fact.label].append(fact)
         items = []
         for label, facts in sorted(groups.items()):
-            ordered, precise = _ordered(facts)
+            ordered, ordering = _ordered(facts)
             last = ordered[-1]
             latest = [
                 fact
                 for fact in ordered
                 if (
                     _instant(fact.event_time) == _instant(last.event_time)
-                    if precise
+                    if ordering != "documented_date_only"
                     else fact.event_time[:10] == last.event_time[:10]
                 )
             ]
@@ -108,7 +153,7 @@ class DocumentaryAnalysis:
                 {
                     "label": label,
                     "documented_count": len(facts),
-                    "ordering": "instant" if precise else "documented_date_only",
+                    "ordering": ordering,
                     "latest_ambiguous": len(latest) > 1,
                     "events": [self._event(f) for f in ordered if storico or f in latest],
                     "notice": (
@@ -128,26 +173,21 @@ class DocumentaryAnalysis:
             groups[fact.label].append(fact)
         items = []
         for label, facts in sorted(groups.items()):
-            ordered, precise = _ordered(facts)
+            ordered, ordering = _ordered(facts)
             events = []
             for fact in ordered:
-                dosage = fact.attributes.get("dosageInstruction", fact.attributes.get("dosage", []))
                 # Mantiene il JSON originale: presenza del campo non attesta la
                 # completezza della prescrizione e non completa unità mancanti.
                 events.append(
                     {
                         **self._event(fact),
-                        "record_role": "prescription"
-                        if fact.kind == "MedicationRequest"
-                        else "administration",
-                        "dosage_documented": bool(dosage),
-                        "missing_structured_fields": _missing_dosage_fields(dosage),
+                        **_medication_details(fact),
                     }
                 )
             items.append(
                 {
                     "label": label,
-                    "ordering": "instant" if precise else "documented_date_only",
+                    "ordering": ordering,
                     "events": events,
                     "notice": (
                         "Sequenza documentale, non riconciliazione clinica. Prescrizioni e "
@@ -161,8 +201,5 @@ class DocumentaryAnalysis:
     def chronology(self, *, tipo=None, dal=None, al=None):
         if tipo is not None and tipo not in EVENT_TYPES:
             raise EvidenceReadError("invalid_type")
-        ordered, precise = _ordered(self._select({tipo} if tipo else EVENT_TYPES, dal, al))
-        return [
-            {**self._event(fact), "ordering": "instant" if precise else "documented_date_only"}
-            for fact in ordered
-        ]
+        ordered, ordering = _ordered(self._select({tipo} if tipo else EVENT_TYPES, dal, al))
+        return [{**self._event(fact), "ordering": ordering} for fact in ordered]

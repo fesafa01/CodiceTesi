@@ -284,6 +284,7 @@ def test_real_client_tool_roundtrip_omits_narration_and_aggregates_usage(
         with pytest.raises(FinalPhaseToolCallError):
             asyncio.run(run)
         assert len(calls) == 1 and not list(tmp_path.rglob("bozza.txt"))
+        assert not list(tmp_path.rglob("risultati_tool.json"))
         report = json.loads(next(tmp_path.rglob("esito.json")).read_text())
         assert report["richieste_llm_avviate"] == 1
         assert report["consumo"]["metrics"]["usage_complete"]
@@ -335,6 +336,14 @@ def test_real_client_tool_roundtrip_omits_narration_and_aggregates_usage(
     assert len(calls) == 2
     assert (path / "risposta.parziale.json").read_text() == final
     report = json.loads((path / "esito.json").read_text())
+    results = json.loads((path / "risultati_tool.json").read_text())
+    tool_return = next(message for message in calls[1]["messages"] if message["role"] == "tool")
+    assert results == {
+        "run_id": report["run_id"],
+        "results": [{"tool": "leggi_evidenze", "result": json.loads(tool_return["content"])}],
+    }
+    assert "risultati_tool.json" in report["artefatti_sha256"]
+    assert "Non riferisce dolore." not in json.dumps(report["consumo"]["tools"])
     assert report["richieste_llm_avviate"] == 2
     assert report["consumo"]["metrics"]["input_tokens"] == 270
     assert report["consumo"]["metrics"]["output_tokens"] == 50

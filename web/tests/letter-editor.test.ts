@@ -41,6 +41,17 @@ test("download labels a recovered draft even after the job completes", () => {
     expect(text).toContain("Testo recuperato");
 });
 
+test("download preserves the original when section recovery is empty", () => {
+    const recovered = { ...job, status: "completed" as const,
+        result: { draft: { sections: [{ section_id: "a", text: "", sources: [] }] },
+            raw_draft_text: "Testo della bozza fuori schema.",
+            validation: { technical: "failed", clinical_review: "not_performed" } } as Job["result"] };
+    const text = letterText([{ id: "a", title: "Prima" }] as Section[], {}, recovered);
+    expect(text).toContain("CONTROLLI TECNICI NON SUPERATI");
+    expect(text).toContain("RISPOSTA ORIGINALE DEL MODELLO\n\nTesto della bozza fuori schema.");
+    expect(text).not.toContain("1. Prima");
+});
+
 test("saved snapshot stays dirty if editing continues during a save", () => {
     expect(sameEdits({ a: "uno", b: "due" }, { b: "due", a: "uno" })).toBe(true);
     expect(sameEdits({ a: "nuovo" }, { a: "salvato" })).toBe(false);

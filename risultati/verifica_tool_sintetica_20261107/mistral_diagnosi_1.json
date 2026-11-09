@@ -1,0 +1,50 @@
+{
+  "fixture_only": true,
+  "clinical_sample_files_read": 0,
+  "counts_toward_180": false,
+  "results": [
+    {
+      "model": "frob/mistral-small-4:119b",
+      "fixture_only": true,
+      "guided_diagnostic": true,
+      "effective_reasoning": "high",
+      "elapsed_seconds": 31.48,
+      "passed": false,
+      "checks": {
+        "all_four_tools_called": false,
+        "all_four_tools_nonempty": false,
+        "no_execution_errors": true,
+        "no_argument_rejections": true,
+        "results_in_followup_request": false,
+        "final_answers_match_invented_fixture": false
+      },
+      "final_answer_checks": {
+        "ultimo_valore": false,
+        "unita": false,
+        "eventi_farmaco": false,
+        "stato_evento_emar": false,
+        "eventi_totali": false,
+        "evidenze_lette": false
+      },
+      "final_output_is_json_object": false,
+      "calls_by_tool": {
+        "riepiloga_osservazioni": 1,
+        "ricostruisci_terapia_documentata": 1,
+        "ricostruisci_sequenza_eventi": 1
+      },
+      "tool_results_in_followup": 3,
+      "model_requests": 2,
+      "tool_summary": {
+        "extraction_version": "mimic-record-v1",
+        "recognized_facts": 4,
+        "executed": 3,
+        "completed": 3,
+        "failed": 0,
+        "empty": 0,
+        "nonempty": 3,
+        "requested": 3,
+        "arguments_rejected": 0
+      }
+    }
+  ]
+}

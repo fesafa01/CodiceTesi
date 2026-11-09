@@ -32,6 +32,7 @@ from codice_tesi.discharge.limits import (
     EvidenceReadError,
     FinalPhaseToolCallError,
     ModelInactivityError,
+    ModelOutputLimitError,
     ToolCallValidationError,
     execution_deadline,
 )
@@ -73,6 +74,10 @@ class LLMDraftGenerator:
         self.telemetry: Telemetry | None = None
         self.partial_callback: Callable[[str, bool], None] | None = None
 
+    @property
+    def tool_results(self) -> list[dict]:
+        return self.tools.results if self.tools is not None else []
+
     async def stream(self, request: PreparedRequest) -> AsyncIterator[str]:
         self.usage = {}
         started = monotonic()
@@ -103,6 +108,14 @@ class LLMDraftGenerator:
             'Inizia direttamente con {"sections":[ e termina con ]}, includendo le 17 '
             "sezioni nell'ordine previsto, senza premesse o Markdown. "
             "Per i dati assenti usa la formula del template, senza inventare informazioni."
+            " Copia ciascun evidence_id con il suo source_id dal catalogo. "
+            "In ogni sezione raggruppa gli evidence_ids sotto una sola voce per source_id. "
+            "Usa soltanto gli ID esatti del catalogo, conservando prefissi e zeri. "
+            "Gli identificativi clinici nei passaggi non sono ID del catalogo. "
+            "Controlla che ogni evidence_id appartenga al source_id citato e che ogni "
+            "section_id compaia una sola volta. "
+            "Se l'attesa dell'istologico è indocumentata, usa la formula del dato mancante "
+            "con sources vuoto."
         )
 
         def budget_for_step(ctx):
@@ -350,6 +363,12 @@ class LLMDraftGenerator:
             self.partial_text = response_text if self.config.tools_enabled else ""
             metrics = observation.snapshot(complete=completed)
             metrics["finish_reason"] = finish_reason
+            if self.config.tools_enabled:
+                metrics["tool_summary"] = {
+                    **self.tools.summary(),
+                    "requested": len(tool_attempts),
+                    "arguments_rejected": sum(c["args_valid"] is False for c in tool_attempts),
+                }
             self.usage = {
                 "input_tokens": metrics["input_tokens"],
                 "output_tokens": metrics["output_tokens"],
@@ -361,6 +380,8 @@ class LLMDraftGenerator:
                 self.usage["tools"] = self.tools.audit()
                 self.usage["tools"]["attempts"] = tool_attempts
                 self.usage["step_budgets"] = step_budgets
+        if finish_reason == "length":
+            raise ModelOutputLimitError()
         if finish_reason != "stop":
             raise ValueError(
                 "Il modello non ha concluso normalmente la lettera "

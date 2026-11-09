@@ -154,6 +154,7 @@ def test_spark_run_saves_hardware_metrics_after_generation(
     assert record["status"] == "completed"
     assert record["test_spark"] == {
         "archive_version": application.ARCHIVE_VERSION,
+        "display_name": packet.context.display_name,
         "context_id": packet.context.id,
         "dataset_version": packet.context.dataset_version,
         "artifact_directory": artifacts.relative_to(tmp_path).as_posix(),

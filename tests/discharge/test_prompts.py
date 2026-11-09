@@ -146,14 +146,24 @@ def test_mimic_prompt_and_expected_campus_draft(
     baseline = prepare_request(base, ContextConfig(), output_tokens=512)
     assert request.prompt_version != baseline.prompt_version
     assert "# Guida alle fonti MIMIC-IV" not in baseline.instructions
+    assert ("Le fonti icu/ descrivono" in request.instructions) == origin.startswith("icu/")
     assert rule in request.instructions
     assert "Scrivi una lettera italiana anche quando tutte le fonti sono inglesi." in (
         request.instructions
     )
-    assert "una sintesi anche di una sola frase" in request.instructions
+    assert "Descrivi in frasi distinte i passaggi pertinenti attestati" in request.instructions
     assert f'Origine: "{origin}"' in request.prompt
     assert request.prompt.count(text) == 1
     assert request.instructions.count("ID canonico:") == len(packet.template.sections) == 17
+    allowed = [
+        json.loads(line.removeprefix("RIFERIMENTI AMMESSI "))
+        for line in request.prompt.splitlines()
+        if line.startswith("RIFERIMENTI AMMESSI ")
+    ]
+    assert {item["source_id"] for item in allowed} == {s.id for s in request.catalog.sources}
+    assert {
+        (item["source_id"], evidence_id) for item in allowed for evidence_id in item["evidence_ids"]
+    } == {(e.source_id, e.id) for e in request.catalog.evidences}
 
     for section_id in documented.keys() & {"diagnosi_codificate", "procedure_codificate"}:
         guide = request.instructions.split(f"ID canonico: {section_id}\n")[1].split("\n\n")[0]
@@ -324,6 +334,8 @@ def test_expanded_mimic_sends_full_catalog_above_previous_limit(packet_factory, 
     assert result.prompt.count("PASSAGGIO evidenza-") == len(result.catalog.evidences)
     assert result.catalog.sources[0].text == text
     assert therapy in result.prompt
+    assert ("Nei dati MIMIC gli aggregatori riconoscono" in result.instructions) == tools_enabled
+    assert r"rappresenta gli a capo con \n" in result.instructions
 
 
 def test_long_italian_notes_fit_with_tokenizer_and_are_preserved_in_full(packet_factory):

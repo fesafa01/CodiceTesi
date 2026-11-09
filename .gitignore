@@ -213,6 +213,8 @@ tempCodeRunnerFile.py
 /output/dimissioni/
 /output/
 /TEST-SPARK/
+/TEST-SPARK-*/
+.DS_Store
 /.codex/config.toml
 /data/
 hosp/
@@ -242,3 +244,24 @@ __marimo__/
 # Il codice sorgente frontend non è una directory di librerie compilate.
 !/web/src/lib/
 !/web/src/lib/**
+
+# Configurazioni e artefatti clinici privati, anche in sottocartelle.
+.env.*
+!.env.example
+!observability/.env.example
+**/codice-tesi-private/
+**/datasets/
+**/logs/
+**/TEST-SPARK*/
+**/access.env
+**/campagna-*.json
+**/campagna-*.json.lock
+*.csv
+*.csv.gz
+*.parquet
+*.sqlite
+*.sqlite3
+*.db
+*.sql.gz
+*.dump
+*.bak
