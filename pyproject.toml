@@ -41,6 +41,7 @@ select = ["E", "F", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.uv]
 # L'installazione non-editable deve seguire anche sorgenti e template, non solo i metadati.
