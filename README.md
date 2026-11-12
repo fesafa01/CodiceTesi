@@ -1,4 +1,4 @@
-# CodiceTesi 0.2.0
+# CodiceTesi
 
 Applicazione locale per preparare e revisionare una bozza di lettera di dimissione
 nei 17 campi CAMPUS. Comprende interfaccia web, backend PostgreSQL, generazione
